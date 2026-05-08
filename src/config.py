@@ -12,12 +12,9 @@ DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
 DATA_EXPORTS = PROJECT_ROOT / "data" / "exports"
 MODELS_DIR = PROJECT_ROOT / "models"
 
-# Home Assistant
-HA_URL = os.getenv("HA_URL", "http://homeassistant.local:8123")
-HA_TOKEN = os.getenv("HA_TOKEN", "")
-
 # evcc
 EVCC_URL = os.getenv("EVCC_URL", "http://evcc.local:7070")
+EVCC_DB_PATH = os.getenv("EVCC_DB_PATH", "/etc/evcc/evcc.db")
 
 # Standort (für Open-Meteo Wetter-API)
 LATITUDE = float(os.getenv("LATITUDE", "51.1657"))
@@ -41,15 +38,6 @@ AWATTAR_URL = "https://api.awattar.de/v1/marketdata"
 # Tibber (optional)
 TIBBER_TOKEN = os.getenv("TIBBER_TOKEN", "")
 TIBBER_URL = "https://api.tibber.com/v1-beta/gql"
-
-# Home Assistant Sensor-Entity-IDs (an eigene Installation anpassen!)
-HA_SENSORS = {
-    "pv_power": os.getenv("HA_SENSOR_PV_POWER", "sensor.inverter_input_power"),
-    "battery_soc": os.getenv("HA_SENSOR_BATTERY_SOC", "sensor.battery_state_of_capacity"),
-    "battery_power": os.getenv("HA_SENSOR_BATTERY_POWER", "sensor.battery_charge_discharge_power"),
-    "grid_power": os.getenv("HA_SENSOR_GRID_POWER", "sensor.power_meter_active_power"),
-    "house_consumption": os.getenv("HA_SENSOR_CONSUMPTION", "sensor.house_consumption"),
-}
 
 # ML-Modell Parameter
 MODEL_PARAMS = {

@@ -1,0 +1,8 @@
+services:
+  evcc:
+    image: evcc/evcc:latest
+    container_name: evcc-demo
+    command: ["--demo"]
+    ports:
+      - "7070:7070"
+    restart: unless-stopped

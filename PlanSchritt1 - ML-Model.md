@@ -2,15 +2,16 @@
 
 ## TL;DR
 Erstellung eines lokalen ML-Modells (LightGBM) zur PV-Ertragsprognose und Lade-Optimierung. 
-Das Modell nutzt historische Daten aus Home Assistant/evcc + Wetterprognosen (Open-Meteo) + Strompreise (Tibber/aWATTar), 
+Das Modell nutzt historische Daten aus evcc (REST API + SQLite-DB) + Wetterprognosen (Open-Meteo) + Strompreise (aWATTar/Tibber), 
 um Eigenverbrauch zu maximieren und Einspeisung bei negativen Preisen zu vermeiden. 
 Entwicklung in Python auf Windows (VS Code), später lauffähig auf Raspberry Pi 4.
 
 ## Kontext
-- Hardware: Huawei Wechselrichter, Hausbatterie, EV mit evcc
-- Daten: evcc + Home Assistant vorhanden
+- Hardware: beliebiger Wechselrichter/Batterie/Wallbox (via evcc abstrahiert)
+- Daten: ausschließlich über evcc (REST API für Echtzeit, SQLite-DB für Historie)
 - Entwicklung: Windows PC, VS Code, Python
 - Ziel: Raspberry Pi 4 kompatibel
+- **Designprinzip**: evcc als einzige Schnittstelle → herstellerunabhängig
 
 ---
 
@@ -21,21 +22,26 @@ Entwicklung in Python auf Windows (VS Code), später lauffähig auf Raspberry Pi
 - Abhängigkeiten: `pandas`, `numpy`, `lightgbm`, `scikit-learn`, `requests`, `matplotlib`, `jupyter`
 - Ordnerstruktur: `data/`, `models/`, `notebooks/`, `src/`
 
-### 1.2 Daten-Connector: Home Assistant
-- REST API Client für HA: `GET /api/history/period/<timestamp>?filter_entity_id=<ids>`
-- Relevante Sensoren identifizieren (Huawei Solar Integration):
-  - PV-Leistung (`sensor.huawei_inverter_active_power`)
-  - Batterie-SoC (`sensor.battery_soc`)
-  - Netzeinspeisung (`sensor.grid_feed_in_power`)
-  - Hausverbrauch (`sensor.home_consumption`)
-- Alternativ: Direktzugriff auf HA SQLite-DB (`home-assistant_v2.db`, Tabelle `statistics`)
-- Daten als CSV exportieren für Offline-Analyse
-
-### 1.3 Daten-Connector: evcc
-- REST API: `GET http://<evcc>:8080/api/state` (aktueller Zustand)
-- `GET /api/history/energy` (historische Energiedaten, 14 Tage)
-- `GET /api/sessions` (Ladesitzungen mit Kosten)
-- evcc SQLite-DB für längere Historie
+### 1.2 Daten-Connector: evcc (einzige Hardware-Schnittstelle)
+- **REST API – Echtzeit-Daten**:
+  - `GET /api/state` → pvPower, batterySoc, batteryPower, gridPower, homePower, loadpoints
+  - `GET /api/tariff/grid` → Day-Ahead Strompreise mit negativen Preisen
+  - `GET /api/tariff/feedin` → Einspeisevergütung
+  - `GET /api/sessions` → Ladesitzungen mit Kosten
+  - `GET /api/history/energy` → Energiehistorie (bis ~14 Tage)
+- **REST API – Steuerung**:
+  - `POST /api/batterymode/{normal|hold|charge}` → Batterie-Modus
+  - `POST /api/batterydischargecontrol/{true|false}` → Entladekontrolle
+  - `POST /api/batterygridchargelimit/{value}` → Netzladung Batterie
+  - `POST /api/buffersoc/{value}` / `POST /api/prioritysoc/{value}` → Batterie-SoC-Grenzen
+  - `POST /api/smartcostlimit/{value}` → Preisschwelle für günstiges Laden
+  - `POST /api/loadpoints/{id}/mode/{off|now|minpv|pv}` → EV-Lademodus
+  - `POST /api/loadpoints/{id}/plan/energy/{kwh}/{time}` → Ladeplan
+- **SQLite-DB (evcc.db) – Langzeit-Historie**:
+  - Tabelle `sessions`: Ladesitzungen mit charged_kwh, solar, price
+  - Zugriff über `sqlite3` für Training mit > 14 Tage Historie
+  - Pfad konfigurierbar via `EVCC_DB_PATH` in `.env`
+- **Hinweis**: Battery-Mode hat 60s Watchdog → Optimizer muss Modus regelmäßig erneuern
 
 ### 1.4 Daten-Connector: Wetter (Open-Meteo)
 - API: `https://api.open-meteo.com/v1/forecast` (kostenlos, kein API-Key)
@@ -106,8 +112,7 @@ Entwicklung in Python auf Windows (VS Code), später lauffähig auf Raspberry Pi
 ## Relevante Dateien (zu erstellen)
 
 - `requirements.txt` — Python-Abhängigkeiten
-- `src/data/ha_connector.py` — Home Assistant Daten-Connector
-- `src/data/evcc_connector.py` — evcc Daten-Connector  
+- `src/data/evcc_connector.py` — evcc Daten-Connector (REST API + SQLite)
 - `src/data/weather_connector.py` — Open-Meteo Wetter-Connector
 - `src/data/price_connector.py` — Strompreis-Connector (aWATTar/Tibber)
 - `src/features/feature_engineering.py` — Feature-Erstellung
@@ -120,7 +125,7 @@ Entwicklung in Python auf Windows (VS Code), später lauffähig auf Raspberry Pi
 
 ## Verification
 
-1. **Daten-Connectoren**: Unit-Tests mit Mock-Daten + manueller Test gegen lokale HA/evcc-Instanz
+1. **Daten-Connectoren**: Unit-Tests mit Mock-Daten + manueller Test gegen lokale evcc-Instanz
 2. **Open-Meteo API**: Abruf und Validierung der Sonneneinstrahlung für eigenen Standort
 3. **Modell-Performance**: MAE < 20% der mittleren PV-Leistung, R² > 0.7 auf Testdaten
 4. **Modellgröße**: < 20 MB serialisiert (Pi4-kompatibel)
@@ -132,11 +137,12 @@ Entwicklung in Python auf Windows (VS Code), später lauffähig auf Raspberry Pi
 - **ML Framework**: LightGBM (nicht TensorFlow/PyTorch — zu groß für Pi4)
 - **Wetter-API**: Open-Meteo (kostenlos, kein Key, beste Solardaten für Deutschland via DWD ICON)
 - **Preis-API**: aWATTar (kostenlos, einfach) — Tibber als Alternative falls bereits Kunde
-- **Datenquelle**: Primär Home Assistant (längere Historie), evcc als Ergänzung
+- **Datenquelle**: Ausschließlich evcc (REST API + SQLite-DB für Historie)
+- **Hardware-Abstraktion**: evcc abstrahiert Wechselrichter, Batterie, Wallbox → herstellerunabhängig
 - **Kein Cloud-Dienst**: Alles lokal, wie in Projektbeschreibung gefordert
 
 ## Offene Punkte
 
-1. **HA Sensor-Entity-IDs**: Die tatsächlichen Sensor-Namen hängen von der Huawei-Integration-Konfiguration ab — müssen beim Setup ermittelt werden
-2. **Historische Daten-Menge**: HA Standard-Retention ist 7 Tage. Falls Recorder länger konfiguriert ist, ideal. Sonst: ab jetzt sammeln + historische Wetterdaten von Open-Meteo als Ersatz
-3. **Batterie-Steuerung**: Kann evcc die Hausbatterie direkt steuern, oder nur EV-Ladung? Falls nur EV → Batterie-Steuerung muss über HA/Modbus erfolgen
+1. **Historische Daten-Menge**: evcc REST API liefert ~14 Tage, SQLite-DB deutlich mehr. Falls Anlage neu: historische Wetterdaten von Open-Meteo als Ersatz für Training
+2. **Battery-Mode Watchdog**: Der externe `batterymode` hat einen 60s-Watchdog – der Optimizer muss den Modus regelmäßig erneuern
+3. **Sponsor-Token**: Einige evcc-Features (z.B. Optimizer) erfordern ein evcc Sponsorship

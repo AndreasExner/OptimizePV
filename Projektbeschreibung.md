@@ -15,11 +15,13 @@ Dieses Projekt soll die Einspeisung privater PV Anlagen optimieren. Inbesondere 
 - Sekundäres Ziel: Reduzierung der Einspeisung während Phasen mit negativem Strompreis
 - ML Modell ohne Cloud lauffähig
 - Hardware: alte x86, Rasperry Pi 4 oder höher, oder vergleichbare Hardware
-- Zielplattform: Home Assitent OS, evcc
+- Zielplattform: evcc (als einzige Schnittstelle zur PV-Hardware)
 - Plattform für Schritt 1 und 2: beliebig, möglichst lokal in VSCODE
+- Unabhängig von PV-Hardware-Herstellern: evcc abstrahiert Wechselrichter, Batterie und Wallbox
 
 ## Funktionen
 
-- Traing ML mit historischen Daten aus der Anlage und Wetter Daten (optional, wenn Anlage neu oder Daten nicht verfügbar)
-- Laufendes ML Training anhand aktueller Daten aus Anlage und Wetterdaten. z.B. stündlich
-- Laufende Optimierung der Einspeisung anhand aktueller Daten aus Anlage und Wetterdaten. z.B. stündlich
+- Traing ML mit historischen Daten aus evcc (SQLite-DB) und Wetter Daten (optional, wenn Anlage neu oder Daten nicht verfügbar)
+- Laufendes ML Training anhand aktueller Daten aus evcc (REST API) und Wetterdaten. z.B. stündlich
+- Laufende Optimierung der Einspeisung anhand aktueller Daten aus evcc und Wetterdaten. z.B. stündlich
+- Steuerung von Batterie-Modi, EV-Ladeplänen und Smart-Cost-Limits über evcc REST API
