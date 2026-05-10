@@ -37,10 +37,12 @@ Entwicklung in Python auf Windows (VS Code), später lauffähig auf Raspberry Pi
   - `POST /api/smartcostlimit/{value}` → Preisschwelle für günstiges Laden
   - `POST /api/loadpoints/{id}/mode/{off|now|minpv|pv}` → EV-Lademodus
   - `POST /api/loadpoints/{id}/plan/energy/{kwh}/{time}` → Ladeplan
-- **SQLite-DB (evcc.db) – Langzeit-Historie**:
+- **SQLite-DB (evcc.db) – OPTIONAL, nur bei lokalem Zugriff**:
   - Tabelle `sessions`: Ladesitzungen mit charged_kwh, solar, price
   - Zugriff über `sqlite3` für Training mit > 14 Tage Historie
   - Pfad konfigurierbar via `EVCC_DB_PATH` in `.env`
+  - **Nicht nutzbar bei Remote-Installationen** (z.B. HA OS) – SQLite ist dateibasiert, kein Netzwerkzugriff möglich
+  - Die REST API (`/api/sessions`, `/api/history/energy`) liefert ebenfalls die volle Historie und ist die bevorzugte Datenquelle
 - **Hinweis**: Battery-Mode hat 60s Watchdog → Optimizer muss Modus regelmäßig erneuern
 
 ### 1.4 Daten-Connector: Wetter (Open-Meteo)

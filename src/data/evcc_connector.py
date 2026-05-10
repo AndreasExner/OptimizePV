@@ -25,12 +25,11 @@ def get_state() -> dict:
     """Liest den aktuellen Systemstatus von evcc.
 
     Returns:
-        Dict mit pvPower, batterySoc, batteryPower, gridPower, homePower,
-        loadpoints etc.
+        Dict mit pvPower, battery, grid, homePower, loadpoints etc.
     """
     resp = requests.get(f"{EVCC_URL}/api/state", timeout=10)
     resp.raise_for_status()
-    return resp.json()["result"]
+    return resp.json()
 
 
 def get_site_power() -> dict:
@@ -41,11 +40,13 @@ def get_site_power() -> dict:
         home_power (alle float).
     """
     state = get_state()
+    battery = state.get("battery", {})
+    grid = state.get("grid", {})
     return {
         "pv_power": float(state.get("pvPower", 0)),
-        "battery_soc": float(state.get("batterySoc", 0)),
-        "battery_power": float(state.get("batteryPower", 0)),
-        "grid_power": float(state.get("gridPower", 0)),
+        "battery_soc": float(battery.get("soc", 0)),
+        "battery_power": float(battery.get("power", 0)),
+        "grid_power": float(grid.get("power", 0)),
         "home_power": float(state.get("homePower", 0)),
     }
 
@@ -59,14 +60,14 @@ def get_sessions() -> pd.DataFrame:
     resp = requests.get(f"{EVCC_URL}/api/sessions", timeout=10)
     resp.raise_for_status()
 
-    sessions = resp.json().get("result", [])
-    if not sessions:
+    sessions = resp.json()
+    if not isinstance(sessions, list) or not sessions:
         return pd.DataFrame()
 
     df = pd.DataFrame(sessions)
     for col in ("created", "finished"):
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col])
+            df[col] = pd.to_datetime(df[col], utc=True)
     return df
 
 
@@ -78,10 +79,31 @@ def get_energy_history() -> pd.DataFrame:
     """
     resp = requests.get(f"{EVCC_URL}/api/history/energy", timeout=10)
     resp.raise_for_status()
-    data = resp.json().get("result", [])
-    if not data:
+    raw = resp.json()
+
+    # Die API liefert eine Liste von Gruppen (grid, loadpoints, ...)
+    # mit jeweils verschachtelten Zeitreihen in 'data'.
+    if not isinstance(raw, list) or not raw:
         return pd.DataFrame()
-    return pd.DataFrame(data)
+
+    frames = []
+    for group in raw:
+        name = group.get("name", "")
+        entries = group.get("data", [])
+        if not entries:
+            continue
+        df_group = pd.DataFrame(entries)
+        df_group["source"] = name
+        frames.append(df_group)
+
+    if not frames:
+        return pd.DataFrame()
+
+    df = pd.concat(frames, ignore_index=True)
+    for col in ("start", "end"):
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], utc=True)
+    return df
 
 
 def get_tariff(tariff_type: str = "grid") -> pd.DataFrame:
@@ -96,13 +118,16 @@ def get_tariff(tariff_type: str = "grid") -> pd.DataFrame:
     resp = requests.get(f"{EVCC_URL}/api/tariff/{tariff_type}", timeout=10)
     resp.raise_for_status()
 
-    rates = resp.json().get("result", {}).get("rates", [])
+    body = resp.json()
+    rates = body.get("rates", [])
     if not rates:
         return pd.DataFrame(columns=["start", "end", "price"])
 
     df = pd.DataFrame(rates)
     df["start"] = pd.to_datetime(df["start"])
     df["end"] = pd.to_datetime(df["end"])
+    if "value" in df.columns:
+        df = df.rename(columns={"value": "price"})
     return df
 
 
@@ -205,7 +230,11 @@ def set_loadpoint_plan(
 
 
 # ---------------------------------------------------------------------------
-# SQLite – Langzeit-Historie
+# SQLite – Langzeit-Historie (OPTIONAL)
+# ---------------------------------------------------------------------------
+# Nur nutzbar wenn die evcc.db lokal vorliegt. Bei Remote-Installationen
+# (z.B. HA OS) stattdessen die REST API verwenden – get_sessions() und
+# get_energy_history() liefern ebenfalls die volle Historie.
 # ---------------------------------------------------------------------------
 
 
@@ -217,14 +246,15 @@ def get_db_path() -> Path:
 def get_long_history(days: int = 90) -> pd.DataFrame:
     """Liest die Energiehistorie aus der evcc SQLite-Datenbank.
 
-    Damit steht deutlich längere Historie als über die REST API (14 Tage)
-    zur Verfügung.
+    OPTIONAL: Nur bei lokalem Zugriff auf evcc.db nutzbar.
+    Bei Remote-Installationen (z.B. HA OS) stattdessen
+    get_sessions() und get_energy_history() verwenden.
 
     Args:
         days: Anzahl Tage in die Vergangenheit.
 
     Returns:
-        DataFrame mit Ladesitzungen.
+        DataFrame mit Ladesitzungen. Leerer DataFrame wenn DB nicht verfügbar.
     """
     db_path = get_db_path()
     if not db_path.exists():

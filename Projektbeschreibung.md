@@ -9,6 +9,11 @@ Dieses Projekt soll die Einspeisung privater PV Anlagen optimieren. Inbesondere 
 2. Lauffähiger demo code
 3. Integration in evcc
 
+## evcc Zugang
+
+- Entwicklung und Test erfolgen gegen eine reale evcc-Instanz
+- **Optional**: Für Entwicklung ohne Zugriff auf eine reale Instanz kann eine evcc-Demo via Docker gestartet werden (`docker-compose up -d`). Die Demo liefert simulierte Daten.
+
 ## Vorgaben und Regeln
 
 - Primäres Ziel: Optimierung Eigenverbrauch

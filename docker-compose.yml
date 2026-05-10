@@ -1,3 +1,6 @@
+# OPTIONAL: evcc Demo-Instanz für Entwicklung ohne reale evcc-Installation.
+# Nicht benötigt wenn Zugriff auf eine reale evcc-Instanz besteht.
+# Start: docker-compose up -d
 services:
   evcc:
     image: evcc/evcc:latest
