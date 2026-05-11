@@ -24,3 +24,7 @@ map:
   - type: data
     read_only: false
 homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: "mdi:solar-power-variant"
+panel_title: "OptimizePV"

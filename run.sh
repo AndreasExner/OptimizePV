@@ -20,4 +20,9 @@ echo "  Intervall:  ${COLLECTOR_INTERVAL}s"
 echo "  Log-Level:  ${LOG_LEVEL}"
 echo "  DB:         ${DATA_DB_PATH}"
 
+# Web-UI starten (Hintergrund)
+python -m src.web &
+echo "  Web-UI:     Port 8099 (Ingress)"
+
+# Collector starten (Vordergrund)
 exec python -m src.main --log-level "${LOG_LEVEL}" collect --interval "${COLLECTOR_INTERVAL}"
