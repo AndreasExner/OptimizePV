@@ -20,6 +20,9 @@ echo "  Intervall:  ${COLLECTOR_INTERVAL}s"
 echo "  Log-Level:  ${LOG_LEVEL}"
 echo "  DB:         ${DATA_DB_PATH}"
 
+# DB sofort initialisieren (vor Healthcheck)
+python -c "from src.data.collector import init_db; init_db()" 2>/dev/null
+
 # Web-UI starten (Hintergrund)
 python -m src.web &
 echo "  Web-UI:     Port 8099 (Ingress)"
