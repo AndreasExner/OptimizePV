@@ -30,9 +30,20 @@ def _headers() -> dict:
     }
 
 
+def _base_url() -> str:
+    """Baut die API-Base-URL.
+
+    HA Supervisor: HA_URL = 'http://supervisor/core/api' (enthält /api)
+    Direkt:        HA_URL = 'http://192.168.x.x:8123'   (/api wird angehängt)
+    """
+    if HA_URL.rstrip("/").endswith("/api"):
+        return HA_URL.rstrip("/")
+    return f"{HA_URL.rstrip('/')}/api"
+
+
 def _get(endpoint: str, timeout: int = 10) -> requests.Response:
     """GET-Request an HA API mit Auth."""
-    resp = requests.get(f"{HA_URL}/api/{endpoint}", headers=_headers(), timeout=timeout)
+    resp = requests.get(f"{_base_url()}/{endpoint}", headers=_headers(), timeout=timeout)
     resp.raise_for_status()
     return resp
 
@@ -142,7 +153,7 @@ def get_history(
     }
 
     resp = requests.get(
-        f"{HA_URL}/api/history/period/{ts}",
+        f"{_base_url()}/history/period/{ts}",
         headers=_headers(),
         params=params,
         timeout=30,

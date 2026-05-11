@@ -1,0 +1,23 @@
+name: "OptimizePV"
+version: "0.1.0"
+slug: "optimizepv"
+description: "PV-Optimierung mit ML-basierter Ertragsprognose. Maximiert Eigenverbrauch durch intelligente Batterie- und Ladesteuerung."
+url: "https://github.com/AndreasExner/OptimizePV"
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: "application"
+boot: "auto"
+options:
+  evcc_url: "http://192.168.66.20:7070"
+  collector_interval: 300
+  log_level: "INFO"
+schema:
+  evcc_url: url
+  collector_interval: "int(60,3600)"
+  log_level: "list(DEBUG|INFO|WARNING|ERROR)"
+map:
+  - type: data
+    read_only: false
+homeassistant_api: true

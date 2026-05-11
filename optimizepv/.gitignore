@@ -1,0 +1,3 @@
+# Build-Artefakte (werden von prepare_build.sh kopiert)
+src/
+requirements.txt
