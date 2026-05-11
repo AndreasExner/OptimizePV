@@ -1,26 +1,23 @@
-#!/usr/bin/with-contenv bashio
+#!/bin/sh
 # OptimizePV Add-on Entry-Point
-# Liest Konfiguration aus HA Add-on Options und startet den Collector.
 
-# --- Konfiguration aus Add-on Options lesen ---
-EVCC_URL=$(bashio::config 'evcc_url')
-COLLECTOR_INTERVAL=$(bashio::config 'collector_interval')
-LOG_LEVEL=$(bashio::config 'log_level')
-
-# HA Supervisor stellt Token und URL automatisch bereit
+# HA Supervisor stellt SUPERVISOR_TOKEN bereit
 export HA_URL="http://supervisor/core/api"
 export HA_TOKEN="${SUPERVISOR_TOKEN}"
-export EVCC_URL
-export COLLECTOR_INTERVAL
-export LOG_LEVEL
 export DATA_DB_PATH="/data/optimizepv.db"
 
-bashio::log.info "OptimizePV startet..."
-bashio::log.info "  HA URL:     ${HA_URL}"
-bashio::log.info "  evcc URL:   ${EVCC_URL}"
-bashio::log.info "  Intervall:  ${COLLECTOR_INTERVAL}s"
-bashio::log.info "  Log-Level:  ${LOG_LEVEL}"
-bashio::log.info "  DB:         ${DATA_DB_PATH}"
+# Konfiguration aus HA Add-on Options lesen (/data/options.json)
+if [ -f /data/options.json ]; then
+    export EVCC_URL=$(python -c "import json; print(json.load(open('/data/options.json')).get('evcc_url',''))")
+    export COLLECTOR_INTERVAL=$(python -c "import json; print(json.load(open('/data/options.json')).get('collector_interval', 300))")
+    export LOG_LEVEL=$(python -c "import json; print(json.load(open('/data/options.json')).get('log_level', 'INFO'))")
+fi
 
-# --- Collector starten ---
+echo "OptimizePV startet..."
+echo "  HA URL:     ${HA_URL}"
+echo "  evcc URL:   ${EVCC_URL}"
+echo "  Intervall:  ${COLLECTOR_INTERVAL}s"
+echo "  Log-Level:  ${LOG_LEVEL}"
+echo "  DB:         ${DATA_DB_PATH}"
+
 exec python -m src.main --log-level "${LOG_LEVEL}" collect --interval "${COLLECTOR_INTERVAL}"
