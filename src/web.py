@@ -305,8 +305,9 @@ def api_table(table_name):
 
 
 def run_web(host: str = "0.0.0.0", port: int = 8099):
-    """Startet den Web-Server."""
-    app.run(host=host, port=port, debug=False)
+    """Startet den Web-Server (Waitress Production Server)."""
+    from waitress import serve
+    serve(app, host=host, port=port, threads=2)
 
 
 if __name__ == "__main__":
