@@ -1,5 +1,5 @@
 name: "OptimizePV"
-version: "0.1.0"
+version: "0.2.0"
 slug: "optimizepv"
 description: "PV-Optimierung mit ML-basierter Ertragsprognose. Maximiert Eigenverbrauch durch intelligente Batterie- und Ladesteuerung."
 url: "https://github.com/AndreasExner/OptimizePV"
@@ -28,3 +28,4 @@ ingress: true
 ingress_port: 8099
 panel_icon: "mdi:solar-power-variant"
 panel_title: "OptimizePV"
+panel_admin: false
