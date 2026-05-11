@@ -38,7 +38,7 @@ ENV HA_URL=http://supervisor/core/api
 ENV COLLECTOR_INTERVAL=300
 
 # Healthcheck
-HEALTHCHECK --interval=600 --timeout=10 --retries=3 \
+HEALTHCHECK --interval=600s --timeout=10s --retries=3 \
     CMD python -c "from pathlib import Path; import time; p=Path('/data/optimizepv.db'); exit(0 if p.exists() and time.time()-p.stat().st_mtime < 900 else 1)"
 
 CMD ["/run.sh"]
