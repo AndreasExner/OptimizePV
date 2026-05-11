@@ -25,7 +25,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Applikation
 COPY src/ src/
 COPY run.sh /
-RUN chmod a+x /run.sh
+
+# Zeilenenden normalisieren (Windows CRLF → Linux LF) und ausführbar machen
+RUN sed -i 's/\r$//' /run.sh && chmod a+x /run.sh
 
 # Daten-Verzeichnis
 RUN mkdir -p /data
