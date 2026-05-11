@@ -12,9 +12,46 @@ DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
 DATA_EXPORTS = PROJECT_ROOT / "data" / "exports"
 MODELS_DIR = PROJECT_ROOT / "models"
 
-# evcc
+# Eigene Datenbank (Collector)
+DATA_DB_PATH = Path(os.getenv("DATA_DB_PATH", str(PROJECT_ROOT / "data" / "optimizepv.db")))
+
+# Collector-Intervalle (Sekunden)
+COLLECTOR_INTERVAL = int(os.getenv("COLLECTOR_INTERVAL", "300"))  # 5 Min
+COLLECTOR_RETRY_DELAY = int(os.getenv("COLLECTOR_RETRY_DELAY", "30"))  # Retry bei Fehler
+
+# evcc (Steuerung)
 EVCC_URL = os.getenv("EVCC_URL", "http://evcc.local:7070")
 EVCC_DB_PATH = os.getenv("EVCC_DB_PATH", "/etc/evcc/evcc.db")
+
+# Home Assistant (Datenquelle)
+HA_URL = os.getenv("HA_URL", "http://homeassistant.local:8123")
+HA_TOKEN = os.getenv("HA_TOKEN", "")
+
+# HA Sensor-Mapping: lokaler Name → HA entity_id
+# Alle Sensoren direkt von den Geräten (kein evcc für Messdaten).
+# Kann per .env überschrieben werden.
+HA_SENSORS = {
+    # --- Momentanleistung (W) ---
+    "pv_power":         os.getenv("HA_SENSOR_PV_POWER", "sensor.inverter_wirkleistung"),
+    "battery_soc":      os.getenv("HA_SENSOR_BATTERY_SOC", "sensor.battery_1_batterieladung"),
+    "battery_power":    os.getenv("HA_SENSOR_BATTERY_POWER", "sensor.battery_1_lade_entladeleistung"),
+    "grid_power":       os.getenv("HA_SENSOR_GRID_POWER", "sensor.power_meter_wirkleistung"),
+    "wp_power_a":       os.getenv("HA_SENSOR_WP_POWER_A", "sensor.shelly_warmepumpe_channel_a_power"),
+    "wp_power_b":       os.getenv("HA_SENSOR_WP_POWER_B", "sensor.shelly_warmepumpe_channel_b_power"),
+    "wp_power_c":       os.getenv("HA_SENSOR_WP_POWER_C", "sensor.shelly_warmepumpe_channel_c_power"),
+    "ev_power":         os.getenv("HA_SENSOR_EV_POWER", "sensor.goe_111927_nrg_11"),
+    # --- Zählerstände (kWh, kumulativ) ---
+    "pv_energy_total":        os.getenv("HA_SENSOR_PV_ENERGY", "sensor.inverter_gesamtenergieertrag"),
+    "pv_energy_daily":        os.getenv("HA_SENSOR_PV_DAILY", "sensor.inverter_tagesertrag"),
+    "grid_import_total":      os.getenv("HA_SENSOR_GRID_IMPORT", "sensor.power_meter_verbrauch"),
+    "grid_export_total":      os.getenv("HA_SENSOR_GRID_EXPORT", "sensor.power_meter_exportierte_energie"),
+    "battery_charge_total":   os.getenv("HA_SENSOR_BAT_CHARGE", "sensor.battery_gesamtladung"),
+    "battery_discharge_total": os.getenv("HA_SENSOR_BAT_DISCHARGE", "sensor.battery_gesamtentladung"),
+    "wp_energy_a":            os.getenv("HA_SENSOR_WP_ENERGY_A", "sensor.shelly_warmepumpe_channel_a_energy"),
+    "wp_energy_b":            os.getenv("HA_SENSOR_WP_ENERGY_B", "sensor.shelly_warmepumpe_channel_b_energy"),
+    "wp_energy_c":            os.getenv("HA_SENSOR_WP_ENERGY_C", "sensor.shelly_warmepumpe_channel_c_energy"),
+    "ev_energy_total":        os.getenv("HA_SENSOR_EV_ENERGY", "sensor.goe_111927_eto"),
+}
 
 # Standort (für Open-Meteo Wetter-API)
 LATITUDE = float(os.getenv("LATITUDE", "51.1657"))
