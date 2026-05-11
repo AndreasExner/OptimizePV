@@ -1,7 +1,28 @@
+# OptimizePV Deployment
+#
+# Collector starten:  docker compose up -d optimizepv
+# Status prüfen:      docker compose exec optimizepv python -m src.main status
+# Logs:               docker compose logs -f optimizepv
+#
 # OPTIONAL: evcc Demo-Instanz für Entwicklung ohne reale evcc-Installation.
-# Nicht benötigt wenn Zugriff auf eine reale evcc-Instanz besteht.
-# Start: docker-compose up -d
+# Start evcc Demo:    docker compose up -d evcc
+
 services:
+  optimizepv:
+    build: .
+    container_name: optimizepv
+    environment:
+      - HA_URL=${HA_URL:-http://192.168.66.20:8123}
+      - HA_TOKEN=${HA_TOKEN}
+      - EVCC_URL=${EVCC_URL:-http://192.168.66.20:7070}
+      - COLLECTOR_INTERVAL=${COLLECTOR_INTERVAL:-300}
+      - DATA_DB_PATH=/data/optimizepv.db
+    volumes:
+      - optimizepv-data:/data
+    restart: unless-stopped
+    # Default: Collector starten. Override mit z.B. "status"
+    # command: ["collect"]
+
   evcc:
     image: evcc/evcc:latest
     container_name: evcc-demo
@@ -9,3 +30,8 @@ services:
     ports:
       - "7070:7070"
     restart: unless-stopped
+    profiles:
+      - demo  # Nur mit: docker compose --profile demo up
+
+volumes:
+  optimizepv-data:

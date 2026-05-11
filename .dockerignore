@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.git/
+.gitignore
+.env
+*.md
+notebooks/
+tests/
+data/
+models/*.joblib
+.vscode/
+.ipynb_checkpoints/
+docker-compose.yml
+Dockerfile

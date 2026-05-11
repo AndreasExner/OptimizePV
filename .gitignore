@@ -22,6 +22,7 @@ env/
 # Data & Models (große Dateien nicht committen)
 data/raw/
 data/exports/
+data/*.db
 models/*.pkl
 models/*.joblib
 

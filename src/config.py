@@ -76,6 +76,16 @@ AWATTAR_URL = "https://api.awattar.de/v1/marketdata"
 TIBBER_TOKEN = os.getenv("TIBBER_TOKEN", "")
 TIBBER_URL = "https://api.tibber.com/v1-beta/gql"
 
+# PV-Anlagen-Spezifikationen (Hardware-Limits)
+PV_SPECS = {
+    "module_peak_kw": float(os.getenv("PV_MODULE_PEAK_KW", "13.4")),    # kWp Module
+    "inverter_max_kw": float(os.getenv("PV_INVERTER_MAX_KW", "10.0")),   # kW Wechselrichter-Limit
+    "battery_capacity_kwh": float(os.getenv("BATTERY_CAPACITY_KWH", "10.0")),
+    "battery_max_charge_kw": float(os.getenv("BATTERY_MAX_CHARGE_KW", "5.0")),
+    "battery_max_discharge_kw": float(os.getenv("BATTERY_MAX_DISCHARGE_KW", "5.0")),
+    "battery_min_soc_pct": float(os.getenv("BATTERY_MIN_SOC_PCT", "10")),
+}
+
 # ML-Modell Parameter
 MODEL_PARAMS = {
     "forecast_hours": 24,        # Vorhersage-Horizont in Stunden

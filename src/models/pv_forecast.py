@@ -1,7 +1,11 @@
-"""LightGBM PV-Ertragsprognose.
+"""LightGBM PV-Modulleistungsprognose.
 
 Trainiert und evaluiert ein LightGBM-Modell zur Vorhersage der
-stündlichen PV-Erzeugung basierend auf Wetter- und Zeitfeatures.
+stündlichen PV-Modulleistung (kWh) basierend auf Wetter- und Zeitfeatures.
+
+Target: pv_module_kwh = inverter_wirkleistung + battery_charge_power
+Dies ist die tatsächliche Modulleistung (bis 13,4 kWp), nicht die
+WR-begrenzte AC-Ausgangsleistung (max 10 kW).
 """
 
 import os
@@ -13,8 +17,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from src.config import MODELS_DIR, MODEL_PARAMS
-from src.features.feature_engineering import FEATURE_COLS
+from src.config import MODELS_DIR, MODEL_PARAMS, PV_SPECS
+from src.features.feature_engineering import FEATURE_COLS, TARGET_COL
 
 
 class PVForecastModel:
@@ -90,26 +94,29 @@ class PVForecastModel:
         }
 
         # Baseline: Persistence (gleiche Stunde gestern)
-        if "pv_kwh_lag24" in df.columns:
-            baseline_pred = df.loc[test_mask, "pv_kwh_lag24"]
+        lag_col = f"{target}_lag24"
+        if lag_col in df.columns:
+            baseline_pred = df.loc[test_mask, lag_col]
             self.metrics["baseline_mae"] = mean_absolute_error(y_test, baseline_pred)
 
         return self.metrics
 
     def predict(self, df: pd.DataFrame) -> np.ndarray:
-        """Vorhersage für neue Daten.
+        """Vorhersage der PV-Modulleistung.
 
         Args:
             df: DataFrame mit Feature-Spalten.
 
         Returns:
-            Array mit vorhergesagten PV-Werten (kWh).
+            Array mit vorhergesagter PV-Modulleistung (kWh/h).
         """
         if self.model is None:
             raise RuntimeError("Modell ist nicht trainiert. Erst train() aufrufen.")
         available = [c for c in self.feature_cols if c in df.columns]
         predictions = self.model.predict(df[available])
-        return np.clip(predictions, 0, None)  # PV kann nicht negativ sein
+        # Clipping: 0 ≤ prediction ≤ Modul-Peak (kWh/h)
+        max_kwh = PV_SPECS["module_peak_kw"]
+        return np.clip(predictions, 0, max_kwh)
 
     def feature_importance(self) -> pd.DataFrame:
         """Gibt Feature-Importances zurück.
