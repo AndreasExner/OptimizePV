@@ -11,7 +11,7 @@ services:
   optimizepv:
     build:
       context: .
-      dockerfile: optimizepv/Dockerfile
+      dockerfile: Dockerfile
     container_name: optimizepv
     environment:
       - HA_URL=${HA_URL:-http://192.168.66.20:8123}
