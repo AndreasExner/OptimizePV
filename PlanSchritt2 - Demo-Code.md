@@ -1,121 +1,122 @@
-# Plan: PV-Optimierung – Schritt 2: Lauffähiger Demo-Code
+# Plan: PV-Optimierung – Schritt 2: Lauffähiger Demo-Code ✅
 
 ## TL;DR
-Aus dem ML-Modell (Schritt 1) wird ein lauffähiger Service: 
-Daten-Collector sammelt Echtzeit-Daten, Scheduler steuert Prognose + Optimierung, 
-alles verpackt als Docker-Container (Vorbereitung für HA Add-on in Schritt 3).
+Daten-Collector sammelt Echtzeit-Daten von Home Assistant, verpackt als HA Add-on 
+mit Web-UI (Flask Ingress). evcc bleibt für die Steuerung zuständig.
 
 ## Kontext
-- Schritt 1 abgeschlossen: LightGBM-Modell (R²=0.80), Connectoren, Backtesting
-- Hauptproblem: evcc speichert keine PV-Erzeugungshistorie → eigener Daten-Collector nötig
-- Ziel: Eigenständiger Service, der ohne Notebooks auskommt
-- Architektur: Docker-Container → später HA Add-on
+- Schritt 1 abgeschlossen: LightGBM-Modell (Proof-of-Concept), Connectoren, Backtesting
+- Architektur-Entscheidung: **HA für Daten, evcc für Steuerung** (Hybrid)
+- evcc speichert keine PV-Erzeugungshistorie → eigener Daten-Collector nötig
+- HA History nur ~24h Detaildaten → Collector löst Langzeit-Aufzeichnung
+
+## Status: ABGESCHLOSSEN
 
 ---
 
-## Phase 1: Daten-Collector
+## Phase 1: Daten-Collector ✅
 
-### 1.1 Eigene Datenbank (SQLite)
-- Tabelle `measurements`: pvPower, batteryPower, batterySoc, gridPower, homePower, timestamp
-- Tabelle `weather_cache`: Wetter-Forecast-Cache (stündlich)
-- Tabelle `model_runs`: Modell-Performance-Tracking
-- Pfad konfigurierbar via `DATA_DB_PATH` in `.env`
-- Migrations-Logik für Schema-Updates
+### 1.1 Eigene Datenbank (SQLite) ✅
+- Tabelle `measurements`: Alle Leistungswerte (W) + Zählerstände (kWh) + pv_dc_power
+- Tabelle `collector_log`: Erfolgs-/Fehlerprotokoll mit Response-Zeiten
+- Schema-Migrationen (v1→v5) für inkrementelle Updates
+- Pfad konfigurierbar via `DATA_DB_PATH`
 
-### 1.2 Collector-Service
-- Periodisch `/api/state` abfragen (Intervall konfigurierbar, default: 5 Min)
-- Werte in eigene SQLite-DB schreiben
-- Fehlertoleranz: evcc-Ausfälle überbrücken (Retry, Logging)
-- Leichtgewichtig: minimaler Speicher-/CPU-Verbrauch
+### 1.2 Collector-Service ✅
+- **Primär**: HA REST API (direkte Geräte-Sensoren, kein evcc für Messdaten)
+- **Fallback**: evcc REST API bei HA-Ausfall
+- Intervall konfigurierbar (Default: 5 Min)
+- Fehlertoleranz: Retry mit Backoff, konsekutive Fehler-Warnung
+- Vorzeichen normalisiert: Grid pos=Bezug, Batterie pos=Laden
+- Home-Verbrauch berechnet: `inverter_wirkleistung + grid - wp - ev`
 
-### 1.3 Daten-Export
-- Historische Daten aus eigener DB als DataFrame bereitstellen
-- Nahtlose Integration mit Feature Engineering aus Schritt 1
-- Übergangsphase: Eigene DB + evcc History API kombinieren (bis genug eigene Daten vorhanden)
+### 1.3 Sensor-Mapping ✅
+- Konfigurierbar über `sensors.yaml` (nicht hardcoded)
+- Default-Datei `sensors.yaml.default` wird beim ersten Start generiert
+- Benutzer kann Sensoren per SSH/Samba in `/data/sensors.yaml` anpassen
+- 19 Sensoren: Leistung (9) + Zählerstände (10)
 
----
-
-## Phase 2: Scheduler & Service-Loop
-
-### 2.1 Haupt-Scheduler
-- **Alle 5 Min**: Daten-Collector (Messwerte sammeln)
-- **Alle 60 Min**: PV-Prognose erstellen + Optimierungsplan berechnen
-- **Alle 60s**: Battery-Mode erneuern (Watchdog)
-- **Täglich (03:00)**: Modell-Retraining mit neuen Daten
-- Implementierung mit `schedule` oder `asyncio`-basiert
-
-### 2.2 Prognose-Pipeline
-- Aktuelle Wetterdaten holen (Open-Meteo Forecast)
-- Features berechnen (aus eigener DB + Wetter)
-- Modell-Vorhersage (24h PV + Verbrauch)
-- Ergebnis loggen
-
-### 2.3 Optimierungs-Loop
-- Auf Basis der Prognose: Batterie-Modus + EV-Ladestrategie bestimmen
-- evcc-API-Befehle senden
-- Battery-Mode-Watchdog (alle 60s erneuern)
-- Dry-Run-Modus: Nur loggen, nicht steuern (für Testing)
-
-### 2.4 Retraining-Pipeline
-- Täglich: Neue Daten aus eigener DB laden
-- Feature Engineering → LightGBM Training
-- Performance-Vergleich: Neues vs. altes Modell
-- Nur deployen wenn neues Modell besser (oder gleich gut)
-- Modell-Archiv: Alte Modelle behalten
+### Gesammelte Datenpunkte
+| Gruppe | Felder |
+|---|---|
+| PV | pv_power (AC), pv_dc_power (DC Module), pv_energy_total, pv_energy_daily |
+| Batterie | battery_soc, battery_power, battery_charge_total, battery_discharge_total |
+| Grid | grid_power, grid_import_total, grid_export_total |
+| Home | home_power (berechnet) |
+| WP | wp_power (3 Phasen summiert), wp_energy_a/b/c |
+| EV | ev_power, ev_energy_total |
 
 ---
 
-## Phase 3: Docker & Deployment-Vorbereitung
+## Phase 2: HA Add-on ✅
 
-### 3.1 Dockerfile
-- Base-Image: `python:3.12-slim` (Multi-Arch: amd64 + arm64)
-- Multi-Stage Build: nur Runtime-Dependencies
-- Volumes: `/data` (DB + Modelle), `/config` (.env)
-- Healthcheck: evcc-Erreichbarkeit prüfen
-- **Hinweis**: Docker nur für Deployment (HA OS), Entwicklung direkt im venv
+### 2.1 Docker ✅
+- Dockerfile: Universal (Alpine via BUILD_FROM / Debian als Fallback)
+- Multi-Arch: amd64 + aarch64
+- Healthcheck mit start-period
+- CRLF→LF Fix im Dockerfile (sed)
 
-### 3.2 docker-compose.yml erweitern
-- OptimizePV-Service neben evcc
-- Volume-Mounts für Persistenz
-- Environment-Variablen für Konfiguration
-- Restart-Policy: `unless-stopped`
+### 2.2 HA Add-on Struktur ✅
+- `config.yaml`: Add-on Konfiguration, Ingress, homeassistant_api
+- `run.sh`: Entry-Point, liest /data/options.json, generiert sensors.yaml
+- `repository.json`: HA Add-on Repository
+- `build_from` direkt in config.yaml (build.yaml deprecated)
 
-### 3.3 CLI / Entry-Point
-- `python -m src.main` → startet Service (Windows/Linux direkt oder im Container)
-- Argumente: `--dry-run`, `--collect-only`, `--retrain`
-- Logging: Strukturiert (JSON), Level konfigurierbar
-- Graceful Shutdown (SIGTERM)
+### 2.3 Web-UI ✅
+- Flask + Waitress (Production Server)
+- HA Ingress auf Port 8099
+- Status-Cards: PV, Batterie, Grid, Home, WP, EV, Collector-Status
+- Daten-Grid: Measurements + Collector Log, konfigurierbare Zeilenanzahl
+- Auto-Refresh Status alle 30s
+
+### 2.4 CLI ✅
+- `python -m src.main collect` → Daten-Collector starten
+- `python -m src.main status` → Collector-Statistiken anzeigen
+- `--log-level`, `--interval` Parameter
 
 ---
 
-## Relevante Dateien (zu erstellen)
+## Phase 3: ML-Anpassungen ✅
 
-- `src/data/collector.py` — Daten-Collector + eigene SQLite-DB
-- `src/scheduler.py` — Haupt-Scheduler (Collect, Predict, Optimize)
-- `src/main.py` — Entry-Point / CLI
-- `Dockerfile` — Docker-Image
-- `docker-compose.yml` — Erweitert um OptimizePV-Service
+### 3.1 Target: pv_module_kwh ✅
+- Modulleistung = inverter_wirkleistung + max(0, battery_charge_power)
+- Tatsächliche DC-Leistung der Module (bis 13,4 kWp), nicht WR-begrenzt
+- Alternativ: pv_dc_power direkt vom WR (sensor.inverter_eingangsleistung)
 
-## Verification
+### 3.2 Feature Engineering ✅
+- `build_training_from_collector()`: Nutzt eigene DB statt evcc
+- `build_hourly_from_collector()`: 5-Min → stündlich mit Zählerstand-Differenzen
+- Lag/Rolling-Features auf pv_module_kwh
+- Mindestens 6 Samples pro Stunde für vollständige Aggregation
 
-1. **Collector**: Sammelt min. 24h Daten fehlerfrei, DB wächst korrekt
-2. **Prognose**: Pipeline liefert 24h-Forecast aus eigener DB
-3. **Dry-Run**: Optimierungsplan wird erstellt und geloggt (ohne evcc-Steuerung)
-4. **Docker**: Container startet, verbindet sich mit evcc, sammelt Daten
-5. **Retraining**: Neues Modell wird trainiert und nur bei Verbesserung deployed
-6. **Ressourcen**: < 100 MB RAM, < 5% CPU auf Pi4
+### 3.3 Optimizer ✅
+- Modulleistung auf AC (max 10kW) und Batterie (max 5kW) aufgeteilt
+- `available_for_loads_kwh`: Verfügbar für WP/EV parallel zur Batterieladung
+- Hardware-Limits aus PV_SPECS in config.py
+
+---
+
+## Verification ✅
+
+1. **Collector**: Läuft auf HA OS, 0% Fehlerrate, alle Sensoren korrekt ✅
+2. **AC-Bus-Bilanz**: WR_out = Home + WP + EV + Grid_Export (geht exakt auf) ✅
+3. **DC-Bilanz**: PV_DC ≈ PV_AC + Bat_Charge (< 50W Verluste) ✅
+4. **Docker**: Container baut und startet auf HA OS (amd64) ✅
+5. **Web-UI**: Erreichbar über HA Ingress ✅
+6. **Sensor-Mapping**: 19 Sensoren aus sensors.yaml geladen ✅
 
 ## Entscheidungen
 
-- **Daten-Collector statt evcc-DB**: evcc speichert keine PV-History → eigene Sammlung nötig
-- **SQLite**: Leichtgewichtig, kein Server, passt zu Pi4
-- **Scheduler statt Cron**: In-Process-Scheduling, Docker-freundlich
-- **Dry-Run-Modus**: Sicheres Testen ohne Einfluss auf die Anlage
-- **Docker-First**: Gleiche Umgebung für Entwicklung und HA Add-on
+- **HA statt evcc für Daten**: Direkte Geräte-Sensoren sind genauer als evcc-Aggregation
+- **evcc für Steuerung**: Bewährte Ladelogik beibehalten
+- **sensors.yaml**: Konfigurierbar, keine Defaults im Code
+- **Waitress**: Production WSGI Server statt Flask dev server
+- **pv_module_kwh als Target**: Modulleistung vor WR-Begrenzung für Optimierung
+- **Home berechnet**: Keine eigene Messung, aus AC-Bus-Bilanz abgeleitet
 
-## Offene Punkte
+## Nächste Schritte
 
-1. **Mindest-Datenmenge für Retraining**: Ab wann lohnt sich eigene DB vs. evcc-History?
-   → Geschätzt: nach ~7 Tagen Collector-Lauf (168 Stunden × 12 Samples = ~2000 Datenpunkte)
-2. **Watchdog-Timing**: 60s reicht für Battery-Mode, aber Netzwerk-Latenz beachten
-3. **HA Add-on Manifest**: Wird in Schritt 3 definiert (addon.yaml, repository)
+1. **Training**: ~7 Tage Collector-Daten → neues Modell mit pv_module_kwh Target
+2. **Scheduler**: Stündliche Prognose + Optimierungsplan (noch nicht implementiert)
+3. **Retraining-Pipeline**: Tägliches automatisches Retraining
+4. **Battery-Mode Watchdog**: 60s-Erneuerung im Live-Betrieb

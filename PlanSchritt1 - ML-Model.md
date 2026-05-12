@@ -1,17 +1,19 @@
-# Plan: PV-Optimierung – Schritt 1: ML-Modell
+# Plan: PV-Optimierung – Schritt 1: ML-Modell ✅
 
 ## TL;DR
 Erstellung eines lokalen ML-Modells (LightGBM) zur PV-Ertragsprognose und Lade-Optimierung. 
-Das Modell nutzt historische Daten aus evcc (REST API + SQLite-DB) + Wetterprognosen (Open-Meteo) + Strompreise (aWATTar/Tibber), 
-um Eigenverbrauch zu maximieren und Einspeisung bei negativen Preisen zu vermeiden. 
-Entwicklung in Python auf Windows (VS Code), später lauffähig auf Raspberry Pi 4.
+Initiales Training auf evcc-Daten + Wetterprognosen (Open-Meteo).
+Schritt 1 ist abgeschlossen – das Modell wird in Schritt 2/3 mit besseren Collector-Daten neu trainiert.
 
 ## Kontext
-- Hardware: beliebiger Wechselrichter/Batterie/Wallbox (via evcc abstrahiert)
-- Daten: ausschließlich über evcc (REST API für Echtzeit, SQLite-DB für Historie)
+- Daten: Ursprünglich nur evcc REST API, später Umstieg auf HA-Sensoren (Schritt 2)
 - Entwicklung: Windows PC, VS Code, Python
-- Ziel: Raspberry Pi 4 kompatibel
-- **Designprinzip**: evcc als einzige Schnittstelle → herstellerunabhängig
+- Ziel: Raspberry Pi 4 kompatibel als HA Add-on
+
+## Status: ABGESCHLOSSEN
+
+Das initiale Modell diente als Proof-of-Concept. Es wird durch ein neues Modell
+mit korrektem Target (`pv_module_kwh`) und besseren Daten (Collector) ersetzt.
 
 ---
 
