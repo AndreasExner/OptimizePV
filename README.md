@@ -1,6 +1,7 @@
 # Pre-Version
 
 *Dies ist eine Vorabversion und ausschließlich zu Entwicklungszwecken verfügbar*
+
 *Installiere diese Version NICHT, wenn Du nicht genau weißt, was Du tust!*
 
 # OptimizePV
@@ -105,13 +106,43 @@ python -m src.main status               # Statistiken anzeigen
 
 ## Sensor-Mapping
 
-Die HA-Sensoren werden in `src/config.py` zugeordnet und können per `.env` überschrieben werden. Unterstützte Geräte:
+Die HA-Sensoren werden über `sensors.yaml` konfiguriert (nicht im Code). Beim ersten Start wird `/data/sensors.yaml` aus den Defaults generiert. Anpassungen per SSH oder Samba:
 
-- **PV-Wechselrichter**: Leistung (W) + Gesamtertrag (kWh)
-- **Batterie**: SoC (%) + Lade-/Entladeleistung (W) + Zählerstände
-- **Smartmeter/Grid**: Leistung (W) + Import/Export-Zähler (kWh)
-- **Wärmepumpe**: Leistung pro Phase (W) + Energie (kWh)
-- **EV-Charger**: Leistung (W) + Energiezähler (kWh)
+```yaml
+# /data/sensors.yaml (Auszug)
+power:
+  pv_ac: "sensor.inverter_wirkleistung"
+  pv_dc: "sensor.inverter_eingangsleistung"
+  battery_soc: "sensor.battery_1_batterieladung"
+  battery_power: "sensor.battery_1_lade_entladeleistung"
+  grid_power: "sensor.power_meter_wirkleistung"
+  wp_power_a: "sensor.shelly_warmepumpe_channel_a_power"
+  # ...
+energy:
+  pv_total: "sensor.inverter_gesamtenergieertrag"
+  grid_import: "sensor.power_meter_verbrauch"
+  # ...
+```
+
+Unterstützte Geräte:
+
+- **PV-Wechselrichter**: AC-Leistung + DC-Eingangsleistung + Gesamtertrag
+- **Batterie**: SoC + Lade-/Entladeleistung + Lade-/Entladezähler
+- **Smartmeter/Grid**: Leistung + Import/Export-Zähler
+- **Wärmepumpe**: Leistung pro Phase + Energie (3-phasig)
+- **EV-Charger**: Leistung + Energiezähler
+
+### Berechnete Werte
+
+- **Home-Verbrauch**: `inverter_wirkleistung + grid_power - wp - ev` (AC-Bus-Bilanz)
+- **PV-Modulleistung**: `pv_dc_power` direkt vom Wechselrichter (DC, vor WR-Begrenzung)
+
+### Vorzeichen-Konvention
+
+| Sensor | pos = | neg = |
+|---|---|---|
+| `grid_power` | Netzbezug | Einspeisung |
+| `battery_power` | Laden | Entladen |
 
 ## ML-Modell
 
@@ -129,9 +160,11 @@ OptimizePV/
 ├── Dockerfile                       # Docker Build (Multi-Arch)
 ├── run.sh                           # Add-on Entry-Point
 ├── repository.json                  # HA Add-on Repository
+├── sensors.yaml.default             # Default Sensor-Mapping
 ├── src/
-│   ├── config.py                    # Zentrale Konfiguration + Sensor-Mapping
+│   ├── config.py                    # Konfiguration (lädt sensors.yaml)
 │   ├── main.py                      # CLI Entry-Point
+│   ├── web.py                       # Web-UI (Flask + Waitress)
 │   ├── data/
 │   │   ├── ha_connector.py          # Home Assistant REST API
 │   │   ├── collector.py             # Daten-Collector + SQLite-DB
