@@ -33,6 +33,7 @@ HA_TOKEN = os.getenv("HA_TOKEN", "")
 HA_SENSORS = {
     # --- Momentanleistung (W) ---
     "pv_power":         os.getenv("HA_SENSOR_PV_POWER", "sensor.inverter_wirkleistung"),
+    "pv_dc_power":      os.getenv("HA_SENSOR_PV_DC_POWER", "sensor.inverter_eingangsleistung"),
     "battery_soc":      os.getenv("HA_SENSOR_BATTERY_SOC", "sensor.battery_1_batterieladung"),
     "battery_power":    os.getenv("HA_SENSOR_BATTERY_POWER", "sensor.battery_1_lade_entladeleistung"),
     "grid_power":       os.getenv("HA_SENSOR_GRID_POWER", "sensor.power_meter_wirkleistung"),

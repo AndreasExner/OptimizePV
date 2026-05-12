@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Schema
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS measurements (
@@ -34,11 +34,12 @@ CREATE TABLE IF NOT EXISTS measurements (
     timestamp   TEXT    NOT NULL,
     source      TEXT    NOT NULL DEFAULT 'ha',
     -- Momentanleistung (W)
-    pv_power    REAL,
+    pv_power    REAL,   -- WR AC-Ausgangsleistung (inverter_wirkleistung)
+    pv_dc_power REAL,   -- DC-Eingangsleistung der Module (inverter_eingangsleistung)
     battery_soc REAL,
     battery_power REAL,
     grid_power  REAL,
-    home_power  REAL,   -- berechnet: PV + Bat_Entladung + Grid_Import - Bat_Ladung - Grid_Export
+    home_power  REAL,   -- berechnet: inverter_wirkleistung - grid_export + grid_import - wp - ev
     wp_power    REAL,   -- Summe 3 Phasen
     ev_power    REAL,
     -- Zählerstände (kWh, kumulativ)
@@ -139,6 +140,13 @@ def _migrate_db(conn: sqlite3.Connection, from_version: int) -> None:
             except sqlite3.OperationalError:
                 pass
         logger.info("DB migriert: v%d → v4", from_version)
+    if from_version < 5:
+        # v5: pv_dc_power (DC-Eingangsleistung der Module)
+        try:
+            conn.execute("ALTER TABLE measurements ADD COLUMN pv_dc_power REAL")
+        except sqlite3.OperationalError:
+            pass
+        logger.info("DB migriert: v%d → v5", from_version)
 
 
 def store_measurement(data: dict, db_path: Path | None = None) -> None:
@@ -148,18 +156,20 @@ def store_measurement(data: dict, db_path: Path | None = None) -> None:
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
             """INSERT INTO measurements
-               (timestamp, source, pv_power, battery_soc, battery_power,
+               (timestamp, source, pv_power, pv_dc_power,
+                battery_soc, battery_power,
                 grid_power, home_power, wp_power, ev_power,
                 pv_energy_total, pv_energy_daily,
                 grid_import_total, grid_export_total,
                 battery_charge_total, battery_discharge_total,
                 wp_energy_total, ev_energy_total,
                 battery_mode, vehicle_connected, loadpoint_power)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data["timestamp"],
                 data.get("source", "ha"),
                 data.get("pv_power"),
+                data.get("pv_dc_power"),
                 data.get("battery_soc"),
                 data.get("battery_power"),
                 data.get("grid_power"),
@@ -303,6 +313,9 @@ def _collect_from_ha(db_path: Path | None = None) -> dict | None:
     # Batterie: Huawei liefert positiv = Laden, negativ = Entladen → passt.
     battery_power = values.get("battery_power")
 
+    # PV DC-Eingangsleistung (direkt von den Modulen, vor WR-Begrenzung)
+    pv_dc_power = values.get("pv_dc_power")
+
     # --- Summierungen ---
     # WP-Leistung: Summe 3 Phasen (Shelly 3EM)
     wp_vals = [values.get(f"wp_power_{p}") for p in "abc"]
@@ -316,13 +329,15 @@ def _collect_from_ha(db_path: Path | None = None) -> dict | None:
     ev_power = values.get("ev_power")
 
     # --- Home-Verbrauch berechnen ---
-    # Home = PV + Bat_Entladung + Grid_Bezug
-    # Mit Vorzeichen: Home = PV - Battery_Power + Grid_Power
-    # (battery_power pos=Laden verbraucht PV, grid_power pos=Bezug liefert Strom)
-    pv = values.get("pv_power") or 0
-    bat = battery_power or 0
-    grd = grid_power or 0
-    home_power = pv - bat + grd  # PV minus Batterieladung plus Netzbezug
+    # Am AC-Bus gilt: inverter_wirkleistung = grid_export + haus + wp + ev - grid_import
+    # Umgestellt: haus = inverter_wirkleistung + grid_import - grid_export - wp - ev
+    # Mit unserer Konvention (grid_power: pos=Bezug, neg=Einspeisung):
+    #   haus = inverter_wirkleistung + grid_power - wp - ev
+    pv_ac = values.get("pv_power") or 0
+    grd = grid_power or 0  # pos=Bezug, neg=Einspeisung
+    wp = wp_power or 0
+    ev = ev_power or 0
+    home_power = pv_ac + grd - wp - ev
     if home_power < 0:
         home_power = 0  # Kann durch Messungenauigkeiten leicht negativ werden
 
@@ -330,6 +345,7 @@ def _collect_from_ha(db_path: Path | None = None) -> dict | None:
         "timestamp": ts,
         "source": "ha",
         "pv_power": values.get("pv_power"),
+        "pv_dc_power": pv_dc_power,
         "battery_soc": values.get("battery_soc"),
         "battery_power": battery_power,
         "grid_power": grid_power,
@@ -354,8 +370,9 @@ def _collect_from_ha(db_path: Path | None = None) -> dict | None:
     store_log("ok", f"PV={data['pv_power']}", response_ms, "ha", db_path)
 
     logger.debug(
-        "[HA] PV=%.0fW, Bat=%s%% (%.0fW), Grid=%.0fW, Home=%.0fW, WP=%.0fW, EV=%.0fW [%dms]",
+        "[HA] PV_AC=%.0fW, PV_DC=%.0fW, Bat=%s%% (%.0fW), Grid=%.0fW, Home=%.0fW, WP=%.0fW, EV=%.0fW [%dms]",
         data["pv_power"] or 0,
+        data["pv_dc_power"] or 0,
         data["battery_soc"] or "?",
         data["battery_power"] or 0,
         data["grid_power"] or 0,
