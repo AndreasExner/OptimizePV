@@ -8,7 +8,6 @@ Dies ist die tatsächliche Modulleistung (bis 13,4 kWp), nicht die
 WR-begrenzte AC-Ausgangsleistung (max 10 kW).
 """
 
-import os
 from pathlib import Path
 
 import joblib
@@ -18,7 +17,7 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from src.config import MODELS_DIR, MODEL_PARAMS, PV_SPECS
-from src.features.feature_engineering import FEATURE_COLS, TARGET_COL
+from src.features.feature_engineering import FEATURE_COLS
 
 
 class PVForecastModel:

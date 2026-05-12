@@ -54,14 +54,14 @@ def _load_sensors() -> dict:
     for p in search_paths:
         if p and p.is_file():
             logger.info("Sensor-Mapping geladen: %s", p)
-            with open(p) as f:
+            with open(p, encoding="utf-8") as f:
                 return yaml.safe_load(f)
 
     # Fallback: Default-Datei
     default_path = PROJECT_ROOT / "sensors.yaml.default"
     if default_path.exists():
         logger.info("Sensor-Mapping geladen (Default): %s", default_path)
-        with open(default_path) as f:
+        with open(default_path, encoding="utf-8") as f:
             return yaml.safe_load(f)
 
     logger.warning("Kein sensors.yaml gefunden – verwende leeres Mapping")

@@ -5,7 +5,6 @@ Einfaches Status-Panel und Daten-Grid für das HA Add-on (Ingress).
 
 import os
 import sqlite3
-from datetime import datetime, timezone
 
 from flask import Flask, jsonify, render_template_string, request
 

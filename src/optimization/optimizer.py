@@ -9,14 +9,11 @@ Die Modulleistung (bis 13,4 kWp) wird auf die verfügbaren Pfade aufgeteilt:
 """
 
 import pandas as pd
-import numpy as np
 
 from src.config import PV_SPECS
 from src.data.evcc_connector import (
     set_battery_mode,
-    set_buffer_soc,
     set_priority_soc,
-    set_smart_cost_limit,
     set_loadpoint_mode,
 )
 

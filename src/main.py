@@ -11,7 +11,7 @@ import logging
 import signal
 import sys
 
-from src.config import COLLECTOR_INTERVAL, DATA_DB_PATH, EVCC_URL
+from src.config import COLLECTOR_INTERVAL
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -79,7 +79,7 @@ def main() -> None:
     setup_logging(args.log_level)
 
     # Graceful Shutdown
-    def handle_signal(sig, frame):
+    def handle_signal(_sig, _frame):
         logging.info("Shutdown Signal empfangen, beende...")
         sys.exit(0)
 
