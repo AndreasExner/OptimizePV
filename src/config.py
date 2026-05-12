@@ -1,9 +1,12 @@
 import os
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
 # .env laden (falls vorhanden)
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Projektpfade
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -27,32 +30,98 @@ EVCC_DB_PATH = os.getenv("EVCC_DB_PATH", "/etc/evcc/evcc.db")
 HA_URL = os.getenv("HA_URL", "http://homeassistant.local:8123")
 HA_TOKEN = os.getenv("HA_TOKEN", "")
 
-# HA Sensor-Mapping: lokaler Name → HA entity_id
-# Alle Sensoren direkt von den Geräten (kein evcc für Messdaten).
-# Kann per .env überschrieben werden.
-HA_SENSORS = {
-    # --- Momentanleistung (W) ---
-    "pv_power":         os.getenv("HA_SENSOR_PV_POWER", "sensor.inverter_wirkleistung"),
-    "pv_dc_power":      os.getenv("HA_SENSOR_PV_DC_POWER", "sensor.inverter_eingangsleistung"),
-    "battery_soc":      os.getenv("HA_SENSOR_BATTERY_SOC", "sensor.battery_1_batterieladung"),
-    "battery_power":    os.getenv("HA_SENSOR_BATTERY_POWER", "sensor.battery_1_lade_entladeleistung"),
-    "grid_power":       os.getenv("HA_SENSOR_GRID_POWER", "sensor.power_meter_wirkleistung"),
-    "wp_power_a":       os.getenv("HA_SENSOR_WP_POWER_A", "sensor.shelly_warmepumpe_channel_a_power"),
-    "wp_power_b":       os.getenv("HA_SENSOR_WP_POWER_B", "sensor.shelly_warmepumpe_channel_b_power"),
-    "wp_power_c":       os.getenv("HA_SENSOR_WP_POWER_C", "sensor.shelly_warmepumpe_channel_c_power"),
-    "ev_power":         os.getenv("HA_SENSOR_EV_POWER", "sensor.goe_111927_nrg_11"),
-    # --- Zählerstände (kWh, kumulativ) ---
-    "pv_energy_total":        os.getenv("HA_SENSOR_PV_ENERGY", "sensor.inverter_gesamtenergieertrag"),
-    "pv_energy_daily":        os.getenv("HA_SENSOR_PV_DAILY", "sensor.inverter_tagesertrag"),
-    "grid_import_total":      os.getenv("HA_SENSOR_GRID_IMPORT", "sensor.power_meter_verbrauch"),
-    "grid_export_total":      os.getenv("HA_SENSOR_GRID_EXPORT", "sensor.power_meter_exportierte_energie"),
-    "battery_charge_total":   os.getenv("HA_SENSOR_BAT_CHARGE", "sensor.battery_gesamtladung"),
-    "battery_discharge_total": os.getenv("HA_SENSOR_BAT_DISCHARGE", "sensor.battery_gesamtentladung"),
-    "wp_energy_a":            os.getenv("HA_SENSOR_WP_ENERGY_A", "sensor.shelly_warmepumpe_channel_a_energy"),
-    "wp_energy_b":            os.getenv("HA_SENSOR_WP_ENERGY_B", "sensor.shelly_warmepumpe_channel_b_energy"),
-    "wp_energy_c":            os.getenv("HA_SENSOR_WP_ENERGY_C", "sensor.shelly_warmepumpe_channel_c_energy"),
-    "ev_energy_total":        os.getenv("HA_SENSOR_EV_ENERGY", "sensor.goe_111927_eto"),
-}
+# HA Sensor-Mapping: Aus sensors.yaml laden (oder Defaults verwenden)
+# sensors.yaml liegt in /data/ (HA Add-on) oder im Projekt-Root (Entwicklung)
+SENSORS_YAML_PATH = Path(os.getenv("SENSORS_YAML_PATH", ""))
+
+def _load_sensors() -> dict:
+    """Lädt das Sensor-Mapping aus sensors.yaml.
+    
+    Suchpfade (in dieser Reihenfolge):
+    1. SENSORS_YAML_PATH (Umgebungsvariable)
+    2. /data/sensors.yaml (HA Add-on)
+    3. PROJECT_ROOT/sensors.yaml (Entwicklung)
+    4. Fallback: sensors.yaml.default
+    """
+    import yaml
+
+    search_paths = [
+        SENSORS_YAML_PATH if SENSORS_YAML_PATH != Path("") else None,
+        Path("/data/sensors.yaml"),
+        PROJECT_ROOT / "sensors.yaml",
+    ]
+
+    for p in search_paths:
+        if p and p.is_file():
+            logger.info("Sensor-Mapping geladen: %s", p)
+            with open(p) as f:
+                return yaml.safe_load(f)
+
+    # Fallback: Default-Datei
+    default_path = PROJECT_ROOT / "sensors.yaml.default"
+    if default_path.exists():
+        logger.info("Sensor-Mapping geladen (Default): %s", default_path)
+        with open(default_path) as f:
+            return yaml.safe_load(f)
+
+    logger.warning("Kein sensors.yaml gefunden – verwende leeres Mapping")
+    return {"power": {}, "energy": {}}
+
+
+def _flatten_sensors(sensor_config: dict) -> dict:
+    """Wandelt das gruppierte YAML-Format in ein flaches Dict um.
+    
+    sensors.yaml:              → HA_SENSORS:
+      power:                       "pv_power": "sensor.inverter..."
+        pv_ac: "sensor..."         "pv_dc_power": "sensor..."
+        pv_dc: "sensor..."         ...
+      energy:
+        pv_total: "sensor..."
+    """
+    mapping = {}
+    
+    power = sensor_config.get("power", {})
+    # Power-Mapping: yaml-key → interner Name
+    power_map = {
+        "pv_ac": "pv_power",
+        "pv_dc": "pv_dc_power",
+        "battery_soc": "battery_soc",
+        "battery_power": "battery_power",
+        "grid_power": "grid_power",
+        "wp_power_a": "wp_power_a",
+        "wp_power_b": "wp_power_b",
+        "wp_power_c": "wp_power_c",
+        "ev_power": "ev_power",
+    }
+    for yaml_key, internal_key in power_map.items():
+        val = power.get(yaml_key, "")
+        if val:
+            mapping[internal_key] = val
+    
+    energy = sensor_config.get("energy", {})
+    # Energy-Mapping: yaml-key → interner Name
+    energy_map = {
+        "pv_total": "pv_energy_total",
+        "pv_daily": "pv_energy_daily",
+        "grid_import": "grid_import_total",
+        "grid_export": "grid_export_total",
+        "battery_charge": "battery_charge_total",
+        "battery_discharge": "battery_discharge_total",
+        "wp_energy_a": "wp_energy_a",
+        "wp_energy_b": "wp_energy_b",
+        "wp_energy_c": "wp_energy_c",
+        "ev_total": "ev_energy_total",
+    }
+    for yaml_key, internal_key in energy_map.items():
+        val = energy.get(yaml_key, "")
+        if val:
+            mapping[internal_key] = val
+    
+    return mapping
+
+
+_sensor_config = _load_sensors()
+HA_SENSORS = _flatten_sensors(_sensor_config)
 
 # Standort (für Open-Meteo Wetter-API)
 LATITUDE = float(os.getenv("LATITUDE", "51.1657"))

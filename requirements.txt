@@ -18,6 +18,7 @@ ipykernel>=6.29.0
 
 # Utilities
 python-dotenv>=1.0.0
+pyyaml>=6.0
 
 # Web UI
 flask>=3.0.0

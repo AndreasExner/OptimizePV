@@ -20,6 +20,15 @@ echo "  Intervall:  ${COLLECTOR_INTERVAL}s"
 echo "  Log-Level:  ${LOG_LEVEL}"
 echo "  DB:         ${DATA_DB_PATH}"
 
+# sensors.yaml beim ersten Start generieren
+export SENSORS_YAML_PATH="/data/sensors.yaml"
+if [ ! -f "${SENSORS_YAML_PATH}" ]; then
+    cp /app/sensors.yaml.default "${SENSORS_YAML_PATH}"
+    echo "  sensors.yaml generiert: ${SENSORS_YAML_PATH}"
+else
+    echo "  sensors.yaml: ${SENSORS_YAML_PATH}"
+fi
+
 # DB sofort initialisieren (vor Healthcheck)
 python -c "from src.data.collector import init_db; init_db()" 2>/dev/null
 

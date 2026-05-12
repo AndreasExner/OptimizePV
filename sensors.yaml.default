@@ -1,0 +1,54 @@
+# OptimizePV Sensor-Mapping
+# 
+# Ordne hier deine Home Assistant Sensoren den Datenpunkten zu.
+# Diese Datei wird beim ersten Start mit Defaults generiert.
+# Anpassungen bleiben bei Add-on Updates erhalten (/data/sensors.yaml).
+#
+# Vorzeichen-Konvention (wird automatisch normalisiert):
+#   grid_power:    Huawei liefert pos=Export → wird invertiert zu pos=Bezug
+#   battery_power: Huawei liefert pos=Laden → bleibt so
+#
+# Nicht benötigte Sensoren können mit "" deaktiviert werden.
+
+# --- Momentanleistung (W) ---
+power:
+  # PV Wechselrichter
+  pv_ac: "sensor.inverter_wirkleistung"              # AC-Ausgangsleistung (max WR-Limit)
+  pv_dc: "sensor.inverter_eingangsleistung"           # DC-Eingangsleistung (direkt von Modulen)
+  
+  # Batterie
+  battery_soc: "sensor.battery_1_batterieladung"      # Ladestand (%)
+  battery_power: "sensor.battery_1_lade_entladeleistung"  # Lade-/Entladeleistung (W)
+  
+  # Grid / Smartmeter
+  grid_power: "sensor.power_meter_wirkleistung"       # Netzleistung (W)
+  
+  # Wärmepumpe (Shelly 3EM, 3 Phasen)
+  wp_power_a: "sensor.shelly_warmepumpe_channel_a_power"
+  wp_power_b: "sensor.shelly_warmepumpe_channel_b_power"
+  wp_power_c: "sensor.shelly_warmepumpe_channel_c_power"
+  
+  # EV Charger
+  ev_power: "sensor.goe_111927_nrg_11"               # Ladeleistung (W)
+
+# --- Zählerstände (kWh, kumulativ) ---
+energy:
+  # PV
+  pv_total: "sensor.inverter_gesamtenergieertrag"     # Gesamtertrag (kWh)
+  pv_daily: "sensor.inverter_tagesertrag"             # Tagesertrag (kWh)
+  
+  # Grid / Smartmeter
+  grid_import: "sensor.power_meter_verbrauch"         # Bezug gesamt (kWh)
+  grid_export: "sensor.power_meter_exportierte_energie"  # Einspeisung gesamt (kWh)
+  
+  # Batterie
+  battery_charge: "sensor.battery_gesamtladung"       # Gesamtladung (kWh)
+  battery_discharge: "sensor.battery_gesamtentladung"  # Gesamtentladung (kWh)
+  
+  # Wärmepumpe (Shelly 3EM, 3 Phasen)
+  wp_energy_a: "sensor.shelly_warmepumpe_channel_a_energy"
+  wp_energy_b: "sensor.shelly_warmepumpe_channel_b_energy"
+  wp_energy_c: "sensor.shelly_warmepumpe_channel_c_energy"
+  
+  # EV Charger
+  ev_total: "sensor.goe_111927_eto"                   # Lademenge gesamt (kWh)

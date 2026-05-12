@@ -24,6 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Applikation
 COPY src/ src/
+COPY sensors.yaml.default .
 COPY run.sh /
 
 # Zeilenenden normalisieren (Windows CRLF → Linux LF) und ausführbar machen
