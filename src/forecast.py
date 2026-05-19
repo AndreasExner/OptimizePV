@@ -120,21 +120,24 @@ def create_forecast(hours: int = 24, db_path: Path | None = None) -> pd.DataFram
 
     # --- 5. ML-Vorhersage ---
     model_path = MODELS_DIR / "pv_forecast.joblib"
+    logger.info("PV-Modell Pfad: %s (existiert: %s)", model_path, model_path.exists())
     if model_path.exists():
         try:
             model = PVForecastModel.load(model_path)
             forecast_df["pv_dc_forecast"] = model.predict(forecast_df)
+            logger.info("PV-Vorhersage OK: Ø %.1f kWh/h", forecast_df["pv_dc_forecast"].mean())
         except Exception as e:
-            logger.error("Modell-Vorhersage fehlgeschlagen: %s", e)
+            logger.error("Modell-Vorhersage fehlgeschlagen: %s", e, exc_info=True)
             forecast_df["pv_dc_forecast"] = 0
     else:
-        logger.warning("Kein trainiertes PV-Modell gefunden")
+        logger.warning("Kein trainiertes PV-Modell gefunden: %s", model_path)
         forecast_df["pv_dc_forecast"] = 0
 
     # --- 5b. Verbrauchs-Vorhersage ---
     from src.models.consumption_forecast import ConsumptionForecastModel, CONSUMPTION_FEATURES
 
     consumption_path = MODELS_DIR / "consumption_forecast.joblib"
+    logger.info("Verbrauchs-Modell Pfad: %s (existiert: %s)", consumption_path, consumption_path.exists())
     if consumption_path.exists():
         try:
             # Fehlende Verbrauchs-Features auffüllen

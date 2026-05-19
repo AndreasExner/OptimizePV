@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.2
+
+- Verbessertes Logging: Modell-Pfade und Vorhersage-Status im Forecast
+- Debug: Existenz-Check für Modell-Dateien im Log
+
 ## 0.7.1
 
 - CLI: `retrain` Befehl zum Trainieren der Modelle auf dem Zielsystem
