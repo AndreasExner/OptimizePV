@@ -593,8 +593,8 @@ def api_dashboard():
 
 @app.route("/api/forecast")
 def api_forecast():
-    """Liefert die Vorhersage als JSON (24h oder 36h)."""
-    from src.forecast import create_forecast
+    """Liefert den Forecast aus der DB (gespeichert vom Scheduler)."""
+    from src.forecast import load_forecast_from_db
 
     hours = request.args.get("hours", "24", type=str)
     try:
@@ -602,37 +602,11 @@ def api_forecast():
     except ValueError:
         hours = 24
 
-    try:
-        df = create_forecast(hours=hours)
-        if df is None or df.empty:
-            return jsonify({"forecast": [], "error": "Keine Vorhersage verfügbar"})
+    records = load_forecast_from_db(hours=hours)
+    if not records:
+        return jsonify({"forecast": [], "error": "Kein Forecast in DB. Warte auf stündlichen Forecast-Lauf."})
 
-        # DataFrame → JSON-serialisierbare Liste
-        records = []
-        for _, row in df.iterrows():
-            price = row.get("price_eur_mwh")
-            # NaN → None (JSON-kompatibel)
-            import math
-            if price is not None and (isinstance(price, float) and math.isnan(price)):
-                price = None
-            records.append({
-                "timestamp": row["timestamp"].isoformat(),
-                "ghi": round(float(row.get("ghi", 0)), 1),
-                "pv_dc_forecast": round(float(row.get("pv_dc_forecast", 0)), 2),
-                "home_forecast": round(float(row.get("home_forecast", 0)), 2),
-                "price_eur_mwh": round(float(price), 1) if price is not None else None,
-                "is_negative": bool(row.get("is_negative", False)),
-                "pv_ac_available": round(float(row.get("pv_ac_available", 0)), 1),
-                "surplus": round(float(row.get("surplus", 0)), 1),
-                "battery_action": str(row.get("battery_action", "")),
-                "ev_recommendation": str(row.get("ev_recommendation", "")),
-                "reason": str(row.get("reason", "")),
-            })
-
-        return jsonify({"forecast": records})
-
-    except Exception as e:
-        return jsonify({"forecast": [], "error": str(e)}), 500
+    return jsonify({"forecast": records})
 
 
 @app.route("/api/status")

@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Schema
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS measurements (
@@ -69,6 +69,25 @@ CREATE TABLE IF NOT EXISTS collector_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_collector_log_ts ON collector_log(timestamp);
+
+CREATE TABLE IF NOT EXISTS forecasts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_time     TEXT    NOT NULL,  -- Vorhersage-Zeitpunkt (stündlich)
+    created_at      TEXT    NOT NULL,  -- Wann die Vorhersage erstellt wurde
+    ghi             REAL,
+    pv_dc_forecast  REAL,
+    home_forecast   REAL,
+    price_eur_mwh   REAL,
+    is_negative     INTEGER DEFAULT 0,
+    pv_ac_available REAL,
+    surplus         REAL,
+    battery_action  TEXT,
+    ev_recommendation TEXT,
+    reason          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_forecasts_target ON forecasts(target_time);
+CREATE INDEX IF NOT EXISTS idx_forecasts_created ON forecasts(created_at);
 
 CREATE TABLE IF NOT EXISTS schema_info (
     version INTEGER NOT NULL
@@ -147,6 +166,28 @@ def _migrate_db(conn: sqlite3.Connection, from_version: int) -> None:
         except sqlite3.OperationalError:
             pass
         logger.info("DB migriert: v%d → v5", from_version)
+    if from_version < 6:
+        # v6: forecasts Tabelle
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS forecasts (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_time     TEXT    NOT NULL,
+                created_at      TEXT    NOT NULL,
+                ghi             REAL,
+                pv_dc_forecast  REAL,
+                home_forecast   REAL,
+                price_eur_mwh   REAL,
+                is_negative     INTEGER DEFAULT 0,
+                pv_ac_available REAL,
+                surplus         REAL,
+                battery_action  TEXT,
+                ev_recommendation TEXT,
+                reason          TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_forecasts_target ON forecasts(target_time);
+            CREATE INDEX IF NOT EXISTS idx_forecasts_created ON forecasts(created_at);
+        """)
+        logger.info("DB migriert: v%d → v6", from_version)
 
 
 def store_measurement(data: dict, db_path: Path | None = None) -> None:

@@ -254,3 +254,145 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
 
     rec_df = pd.DataFrame(recommendations)
     return pd.concat([df.reset_index(drop=True), rec_df], axis=1)
+
+
+# ---------------------------------------------------------------------------
+# Forecast speichern und laden (DB)
+# ---------------------------------------------------------------------------
+
+import sqlite3
+
+
+def save_forecast_to_db(df: pd.DataFrame, db_path: Path | None = None) -> int:
+    """Speichert Forecast in die DB. Aktualisiert bestehende Einträge.
+
+    Für jede Zielstunde wird der alte "neueste" Eintrag überschrieben.
+    Historische Forecasts (ältere created_at) bleiben erhalten.
+
+    Returns:
+        Anzahl geschriebener Zeilen.
+    """
+    db_path = db_path or DATA_DB_PATH
+    if df is None or df.empty:
+        return 0
+
+    now = datetime.now(timezone.utc).isoformat()
+    count = 0
+
+    with sqlite3.connect(str(db_path)) as conn:
+        for _, row in df.iterrows():
+            target_time = row["timestamp"].isoformat()
+
+            price = row.get("price_eur_mwh")
+            if price is not None and isinstance(price, float) and np.isnan(price):
+                price = None
+
+            conn.execute(
+                """INSERT INTO forecasts
+                   (target_time, created_at, ghi, pv_dc_forecast, home_forecast,
+                    price_eur_mwh, is_negative, pv_ac_available, surplus,
+                    battery_action, ev_recommendation, reason)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    target_time, now,
+                    float(row.get("ghi", 0)),
+                    float(row.get("pv_dc_forecast", 0)),
+                    float(row.get("home_forecast", 0)),
+                    float(price) if price is not None else None,
+                    1 if row.get("is_negative", False) else 0,
+                    float(row.get("pv_ac_available", 0)),
+                    float(row.get("surplus", 0)),
+                    str(row.get("battery_action", "")),
+                    str(row.get("ev_recommendation", "")),
+                    str(row.get("reason", "")),
+                ),
+            )
+            count += 1
+
+    logger.info("Forecast gespeichert: %d Zeilen in DB", count)
+    return count
+
+
+def load_forecast_from_db(hours: int = 24, db_path: Path | None = None) -> list[dict]:
+    """Liest den aktuellsten Forecast aus der DB.
+
+    Für jede Zielstunde wird nur die neueste Vorhersage zurückgegeben.
+
+    Returns:
+        Liste von Dicts (JSON-serialisierbar).
+    """
+    db_path = db_path or DATA_DB_PATH
+    if not db_path.exists():
+        return []
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT f.* FROM forecasts f
+               INNER JOIN (
+                   SELECT target_time, MAX(created_at) as latest
+                   FROM forecasts
+                   WHERE target_time >= ?
+                   GROUP BY target_time
+               ) latest ON f.target_time = latest.target_time
+                       AND f.created_at = latest.latest
+               ORDER BY f.target_time
+               LIMIT ?""",
+            (now, hours),
+        ).fetchall()
+
+    records = []
+    for row in rows:
+        records.append({
+            "timestamp": row["target_time"],
+            "ghi": row["ghi"],
+            "pv_dc_forecast": row["pv_dc_forecast"],
+            "home_forecast": row["home_forecast"],
+            "price_eur_mwh": row["price_eur_mwh"],
+            "is_negative": bool(row["is_negative"]),
+            "pv_ac_available": row["pv_ac_available"],
+            "surplus": row["surplus"],
+            "battery_action": row["battery_action"],
+            "ev_recommendation": row["ev_recommendation"],
+            "reason": row["reason"],
+            "created_at": row["created_at"],
+        })
+
+    return records
+
+
+def run_forecast_once(db_path: Path | None = None) -> bool:
+    """Erstellt einen Forecast und speichert ihn in der DB.
+
+    Returns:
+        True bei Erfolg.
+    """
+    try:
+        df = create_forecast(hours=36, db_path=db_path)
+        if df is None or df.empty:
+            logger.warning("Forecast leer - keine Daten gespeichert")
+            return False
+        save_forecast_to_db(df, db_path)
+        return True
+    except Exception as e:
+        logger.error("Forecast fehlgeschlagen: %s", e, exc_info=True)
+        return False
+
+
+def run_forecast_scheduler(
+    db_path: Path | None = None,
+    interval_seconds: int = 3600,
+) -> None:
+    """Startet den Forecast-Scheduler als Endlosschleife (stuendlich)."""
+    import time
+
+    logger.info("Forecast-Scheduler gestartet (interval=%ds)", interval_seconds)
+
+    # Sofort beim Start einen Forecast erstellen
+    run_forecast_once(db_path)
+
+    while True:
+        time.sleep(interval_seconds)
+        run_forecast_once(db_path)
