@@ -10,9 +10,11 @@ Lokale ML-basierte Optimierung einer privaten PV-Anlage. Maximiert den Eigenverb
 
 ## Features
 
-- **Daten-Collector**: Sammelt PV-, Batterie-, Grid- und Verbrauchsdaten über Home Assistant
-- **ML-Prognose**: LightGBM-Modell sagt PV-Modulleistung voraus (stündlich, 24h voraus)
-- **Optimierung**: Regelbasierte Batterie- und Ladesteuerung via evcc
+- **Daten-Collector**: Sammelt PV-, Batterie-, Grid- und Verbrauchsdaten über Home Assistant (5-Min-Intervall)
+- **ML-Prognose PV**: LightGBM-Modell sagt PV-DC-Modulleistung voraus (stündlich, 24/36h)
+- **ML-Prognose Verbrauch**: Zweites Modell für Hausverbrauch (Haushalt + WP)
+- **Optimierung**: Empfehlungen für Batterie und EV basierend auf PV-Überschuss und Strompreis
+- **Dashboard**: Chart mit PV-Prognose, Verbrauch, Globalstrahlung und Börsenstrompreis
 - **HA Add-on**: Installierbar als Home Assistant Add-on (Docker, Multi-Arch)
 
 ## Architektur
@@ -144,13 +146,18 @@ Unterstützte Geräte:
 | `grid_power` | Netzbezug | Einspeisung |
 | `battery_power` | Laden | Entladen |
 
-## ML-Modell
+## ML-Modelle
 
+### PV-Ertragsprognose
 - **Algorithmus**: LightGBM Regressor
-- **Target**: `pv_module_kwh` – Stündliche PV-Modulleistung (DC, vor WR-Begrenzung)
-- **Berechnung**: `Modulleistung = WR-Ausgangsleistung + Batterie-Ladeleistung`
-- **Features**: Sonneneinstrahlung, Temperatur, Bewölkung, Tageszeit, Lag/Rolling-Statistiken
+- **Target**: `pv_dc_kwh` – DC-Eingangsleistung der Module (stündlich)
+- **Features**: Sonneneinstrahlung (GHI, DNI, DHI), Temperatur, Bewölkung, Tageszeit, Lag/Rolling
 - **Modellgröße**: < 1 MB (Pi4-kompatibel)
+
+### Verbrauchsprognose
+- **Target**: `home_kwh` – Hausverbrauch inkl. WP (ohne EV)
+- **Features**: Tageszeit, Wochentag, Temperatur, Lag/Rolling
+- Beide Modelle werden für die 24/36h Vorhersage kombiniert
 
 ## Projektstruktur
 

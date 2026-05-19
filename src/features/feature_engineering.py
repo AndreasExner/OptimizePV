@@ -349,10 +349,12 @@ def build_training_from_collector(
     # 4. Lag-Features
     df = build_lag_features(df, target, lags=[1, 2, 3, 24])
     if "home_kwh" in df.columns:
-        df = build_lag_features(df, "home_kwh", lags=[1, 24])
+        df = build_lag_features(df, "home_kwh", lags=[1, 2, 3, 24])
 
     # 5. Rolling-Features
     df = build_rolling_features(df, target, windows=[3, 6, 24])
+    if "home_kwh" in df.columns:
+        df = build_rolling_features(df, "home_kwh", windows=[3, 6, 24])
 
     # 6. NaN-Zeilen durch Lags entfernen
     df = df.dropna(subset=[c for c in df.columns if "lag" in c]).reset_index(drop=True)

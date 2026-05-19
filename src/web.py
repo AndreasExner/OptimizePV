@@ -127,7 +127,13 @@ DASHBOARD_TEMPLATE = """
 
     <!-- Forecast Chart -->
     <div class="chart-container">
-        <h2>24h Vorhersage</h2>
+        <div class="toolbar" style="margin-bottom:8px">
+            <h2 style="margin:0">Vorhersage</h2>
+            <select id="forecast-hours" onchange="loadForecast()">
+                <option value="24" selected>24 Stunden</option>
+                <option value="36">36 Stunden</option>
+            </select>
+        </div>
         <canvas id="forecast-chart"></canvas>
     </div>
 
@@ -141,6 +147,13 @@ DASHBOARD_TEMPLATE = """
     const BASE = window.location.pathname.replace(/\\/$/, '');
     document.getElementById('nav-collector').href = BASE + '/collector';
     let forecastChart = null;
+
+    function fmtTs(ts) {
+        if (!ts) return '–';
+        const d = new Date(ts);
+        return d.toLocaleDateString('de-DE', {day:'2-digit', month:'2-digit', year:'2-digit'})
+             + ' ' + d.toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
+    }
 
     async function loadDashboard() {
         const resp = await fetch(BASE + '/api/dashboard');
@@ -171,25 +184,34 @@ DASHBOARD_TEMPLATE = """
                 <div class="label">Collector (24h)</div>
                 <div class="value">${d.collector.ok} <span class="unit">OK</span></div>
                 <div class="sub">${d.collector.errors} Fehler (${d.collector.error_rate.toFixed(1)}%), gesamt: ${d.collector.total_all_time}</div>
-                <div class="sub">Letzte Abfrage: ${d.collector.last_timestamp || '–'}</div>
+                <div class="sub">Letzte Abfrage: ${fmtTs(d.collector.last_timestamp)}</div>
             </div>
             <div class="card info">
                 <div class="label">Letztes Training</div>
                 ${trainingHtml}
+                <div class="sub">${fmtTs(d.training.trained_at)}</div>
             </div>
         `;
     }
 
     async function loadForecast() {
+        const chartEl = document.getElementById('forecast-chart');
         try {
-            const resp = await fetch(BASE + '/api/forecast');
+            const hours = document.getElementById('forecast-hours').value;
+            chartEl.style.opacity = '0.4';
+            const resp = await fetch(BASE + '/api/forecast?hours=' + hours);
             const data = await resp.json();
-            if (!data.forecast || !data.forecast.length) return;
+            if (!data.forecast || !data.forecast.length) {
+                console.warn('Kein Forecast:', data.error);
+                return;
+            }
 
             const fc = data.forecast;
+            const showDate = parseInt(hours) > 24;
             const labels = fc.map(r => {
                 const d = new Date(r.timestamp);
-                return d.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+                const time = d.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+                return showDate ? d.toLocaleDateString('de-DE', {day:'2-digit', month:'2-digit'}) + ' ' + time : time;
             });
 
             const ctx = document.getElementById('forecast-chart').getContext('2d');
@@ -206,6 +228,18 @@ DASHBOARD_TEMPLATE = """
                             backgroundColor: 'rgba(255, 167, 38, 0.7)',
                             borderColor: '#ffa726',
                             borderWidth: 1,
+                            yAxisID: 'y',
+                            order: 3,
+                        },
+                        {
+                            label: 'Verbrauch (kWh)',
+                            data: fc.map(r => r.home_forecast),
+                            type: 'line',
+                            borderColor: '#42a5f5',
+                            backgroundColor: 'rgba(66, 165, 245, 0.1)',
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            fill: true,
                             yAxisID: 'y',
                             order: 2,
                         },
@@ -242,7 +276,7 @@ DASHBOARD_TEMPLATE = """
                     scales: {
                         x: { ticks: { color: '#999', font: { size: 10 } }, grid: { color: '#333' } },
                         y: {
-                            position: 'left', title: { display: true, text: 'PV DC (kWh)', color: '#ffa726' },
+                            position: 'left', title: { display: true, text: 'kWh/h', color: '#ffa726' },
                             ticks: { color: '#ffa726' }, grid: { color: '#333' }, min: 0,
                         },
                         y2: {
@@ -271,7 +305,7 @@ DASHBOARD_TEMPLATE = """
                 return 'badge-gray';
             };
 
-            let html = '<thead><tr><th>Zeit</th><th>PV DC</th><th>AC verf.</th><th>Preis</th><th>Batterie</th><th>EV</th><th>Begründung</th></tr></thead><tbody>';
+            let html = '<thead><tr><th>Zeit</th><th>PV DC</th><th>Verbr.</th><th>Übersch.</th><th>Preis</th><th>Batterie</th><th>EV</th><th>Begründung</th></tr></thead><tbody>';
             fc.forEach(r => {
                 const t = new Date(r.timestamp).toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
                 const price = r.price_eur_mwh != null ? r.price_eur_mwh.toFixed(1) : '–';
@@ -279,7 +313,8 @@ DASHBOARD_TEMPLATE = """
                 html += `<tr>
                     <td>${t}</td>
                     <td class="num">${r.pv_dc_forecast.toFixed(1)} kWh</td>
-                    <td class="num">${r.pv_ac_available.toFixed(1)} kW</td>
+                    <td class="num">${r.home_forecast.toFixed(1)} kWh</td>
+                    <td class="num">${r.surplus.toFixed(1)} kW</td>
                     <td><span class="badge ${priceClass}">${price}</span></td>
                     <td><span class="badge ${badgeClass(r.battery_action)}">${r.battery_action}</span></td>
                     <td><span class="badge ${badgeClass(r.ev_recommendation)}">${r.ev_recommendation}</span></td>
@@ -291,6 +326,8 @@ DASHBOARD_TEMPLATE = """
 
         } catch (e) {
             console.error('Forecast laden fehlgeschlagen:', e);
+        } finally {
+            document.getElementById('forecast-chart').style.opacity = '1';
         }
     }
 
@@ -523,13 +560,18 @@ def api_dashboard():
 
         # Training-Infos
         model_path = MODELS_DIR / "pv_forecast.joblib"
-        training = {"r2": None, "mae": None}
+        training = {"r2": None, "mae": None, "trained_at": None}
         if model_path.exists():
             try:
+                import os
                 model_data = joblib.load(model_path)
                 metrics = model_data.get("metrics", {})
                 training["r2"] = metrics.get("test_r2")
                 training["mae"] = metrics.get("test_mae")
+                # Zeitpunkt aus Datei-Änderungsdatum
+                mtime = os.path.getmtime(model_path)
+                from datetime import datetime, timezone
+                training["trained_at"] = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
             except Exception:
                 pass
 
@@ -551,24 +593,37 @@ def api_dashboard():
 
 @app.route("/api/forecast")
 def api_forecast():
-    """Liefert die 24h Vorhersage als JSON."""
+    """Liefert die Vorhersage als JSON (24h oder 36h)."""
     from src.forecast import create_forecast
 
+    hours = request.args.get("hours", "24", type=str)
     try:
-        df = create_forecast()
+        hours = int(hours)
+    except ValueError:
+        hours = 24
+
+    try:
+        df = create_forecast(hours=hours)
         if df is None or df.empty:
             return jsonify({"forecast": [], "error": "Keine Vorhersage verfügbar"})
 
         # DataFrame → JSON-serialisierbare Liste
         records = []
         for _, row in df.iterrows():
+            price = row.get("price_eur_mwh")
+            # NaN → None (JSON-kompatibel)
+            import math
+            if price is not None and (isinstance(price, float) and math.isnan(price)):
+                price = None
             records.append({
                 "timestamp": row["timestamp"].isoformat(),
                 "ghi": round(float(row.get("ghi", 0)), 1),
                 "pv_dc_forecast": round(float(row.get("pv_dc_forecast", 0)), 2),
-                "price_eur_mwh": round(float(row["price_eur_mwh"]), 1) if row.get("price_eur_mwh") is not None else None,
+                "home_forecast": round(float(row.get("home_forecast", 0)), 2),
+                "price_eur_mwh": round(float(price), 1) if price is not None else None,
                 "is_negative": bool(row.get("is_negative", False)),
                 "pv_ac_available": round(float(row.get("pv_ac_available", 0)), 1),
+                "surplus": round(float(row.get("surplus", 0)), 1),
                 "battery_action": str(row.get("battery_action", "")),
                 "ev_recommendation": str(row.get("ev_recommendation", "")),
                 "reason": str(row.get("reason", "")),

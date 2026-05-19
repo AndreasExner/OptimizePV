@@ -24,14 +24,19 @@ from src.models.pv_forecast import PVForecastModel
 logger = logging.getLogger(__name__)
 
 
-def create_forecast(db_path: Path | None = None) -> pd.DataFrame | None:
-    """Erstellt eine Rolling 24h Vorhersage.
+def create_forecast(hours: int = 24, db_path: Path | None = None) -> pd.DataFrame | None:
+    """Erstellt eine Rolling Vorhersage (24h oder 36h).
+
+    Args:
+        hours: Vorhersage-Horizont in Stunden (24 oder 36).
+        db_path: Pfad zur Collector-DB.
 
     Returns:
         DataFrame mit stündlichen Vorhersagen, oder None bei Fehler.
         Spalten: timestamp, ghi, pv_dc_forecast, price_eur_mwh,
                  pv_ac_available, battery_action, ev_recommendation, reason
     """
+    hours = min(max(hours, 24), 48)  # Clamp auf 24-48
     db_path = db_path or DATA_DB_PATH
 
     # --- 1. Wettervorhersage (24h) ---
@@ -46,7 +51,7 @@ def create_forecast(db_path: Path | None = None) -> pd.DataFrame | None:
     weather["timestamp_local"] = pd.to_datetime(weather["timestamp"])
     if weather["timestamp_local"].dt.tz is None:
         weather["timestamp_local"] = weather["timestamp_local"].dt.tz_localize("Europe/Berlin")
-    weather = weather[weather["timestamp_local"] >= now].head(24)
+    weather = weather[weather["timestamp_local"] >= now].head(hours)
 
     if weather.empty:
         logger.warning("Keine Wetterdaten für die nächsten 24h")
@@ -96,7 +101,8 @@ def create_forecast(db_path: Path | None = None) -> pd.DataFrame | None:
         combined = combined.sort_values("timestamp").reset_index(drop=True)
         combined = build_lag_features(combined, TARGET_COL, lags=[1, 2, 3, 24])
         if "home_kwh" in combined.columns:
-            combined = build_lag_features(combined, "home_kwh", lags=[1, 24])
+            combined = build_lag_features(combined, "home_kwh", lags=[1, 2, 3, 24])
+            combined = build_rolling_features(combined, "home_kwh", windows=[3, 6, 24])
         combined = build_rolling_features(combined, TARGET_COL, windows=[3, 6, 24])
 
         # Nur die Forecast-Zeilen behalten
@@ -122,12 +128,33 @@ def create_forecast(db_path: Path | None = None) -> pd.DataFrame | None:
             logger.error("Modell-Vorhersage fehlgeschlagen: %s", e)
             forecast_df["pv_dc_forecast"] = 0
     else:
-        logger.warning("Kein trainiertes Modell gefunden")
+        logger.warning("Kein trainiertes PV-Modell gefunden")
         forecast_df["pv_dc_forecast"] = 0
 
+    # --- 5b. Verbrauchs-Vorhersage ---
+    from src.models.consumption_forecast import ConsumptionForecastModel, CONSUMPTION_FEATURES
+
+    consumption_path = MODELS_DIR / "consumption_forecast.joblib"
+    if consumption_path.exists():
+        try:
+            # Fehlende Verbrauchs-Features auffüllen
+            for col in CONSUMPTION_FEATURES:
+                if col not in forecast_df.columns:
+                    forecast_df[col] = 0
+            cons_model = ConsumptionForecastModel.load(consumption_path)
+            forecast_df["home_forecast"] = cons_model.predict(forecast_df)
+        except Exception as e:
+            logger.error("Verbrauchsvorhersage fehlgeschlagen: %s", e)
+            forecast_df["home_forecast"] = 0.5  # Fallback
+    else:
+        logger.warning("Kein Verbrauchsmodell gefunden – verwende 0.5 kWh/h")
+        forecast_df["home_forecast"] = 0.5
+
     # --- 6. Ergebnis zusammenbauen ---
-    result = forecast_df[["timestamp", "shortwave_radiation", "pv_dc_forecast"]].copy()
+    result = forecast_df[["timestamp", "shortwave_radiation", "pv_dc_forecast", "home_forecast"]].copy()
     result = result.rename(columns={"shortwave_radiation": "ghi"})
+    # home_forecast sichern – wird von _add_recommendations gelesen aber nicht dupliziert
+    result["home_forecast"] = result["home_forecast"].round(3)
 
     # Preise mergen (nach Stunde)
     if not prices.empty:
@@ -151,13 +178,14 @@ def create_forecast(db_path: Path | None = None) -> pd.DataFrame | None:
 
 
 def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
-    """Fügt Optimierungsempfehlungen hinzu."""
+    """Fügt Optimierungsempfehlungen hinzu – berücksichtigt Verbrauch."""
     inverter_max = PV_SPECS["inverter_max_kw"]
     bat_max_charge = PV_SPECS["battery_max_charge_kw"]
 
     recommendations = []
     for _, row in df.iterrows():
         pv_dc = row["pv_dc_forecast"]
+        home = row.get("home_forecast", 0.5)
         price = row.get("price_eur_mwh")
         is_negative = row.get("is_negative", False)
         ghi = row.get("ghi", 0)
@@ -165,43 +193,60 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
         # PV auf AC und Batterie aufteilen
         pv_ac = min(pv_dc, inverter_max)
         dc_surplus = max(0, pv_dc - inverter_max)
-        bat_charge_potential = min(dc_surplus, bat_max_charge)
+        bat_charge_dc = min(dc_surplus, bat_max_charge)
+
+        # AC-Überschuss nach Verbrauch
+        ac_surplus = max(0, pv_ac - home)
+        ac_deficit = max(0, home - pv_ac)
 
         # Empfehlungen
         if ghi <= 10:  # Nacht
             recommendations.append({
                 "pv_ac_available": 0,
-                "battery_action": "Entladen (Nacht)",
+                "surplus": 0,
+                "battery_action": "Entladen" if ac_deficit > 0.3 else "Halten",
                 "ev_recommendation": "Netz" if not is_negative else "Laden (neg. Preis!)",
-                "reason": "Kein PV-Ertrag",
+                "reason": f"Nacht – Verbrauch {home:.1f}kWh",
             })
         elif is_negative:
             recommendations.append({
-                "pv_ac_available": pv_ac,
+                "pv_ac_available": round(pv_ac, 1),
+                "surplus": round(ac_surplus, 1),
                 "battery_action": "Aus Netz laden!",
                 "ev_recommendation": "Laden (neg. Preis!)",
-                "reason": f"Negativer Strompreis ({price:.0f} EUR/MWh)",
+                "reason": f"Neg. Preis ({price:.0f} EUR/MWh) – alles laden!",
             })
-        elif pv_dc > inverter_max:
+        elif ac_surplus > 3:
             recommendations.append({
-                "pv_ac_available": pv_ac,
-                "battery_action": f"DC-Laden ({bat_charge_potential:.1f}kW)",
-                "ev_recommendation": "PV-Laden" if pv_ac > 3 else "Warten",
-                "reason": f"PV-Überschuss: {pv_dc:.1f}kW > WR {inverter_max}kW",
+                "pv_ac_available": round(pv_ac, 1),
+                "surplus": round(ac_surplus + bat_charge_dc, 1),
+                "battery_action": f"Laden ({ac_surplus + bat_charge_dc:.1f}kW verf.)",
+                "ev_recommendation": "PV-Laden",
+                "reason": f"PV {pv_dc:.1f}kW − Haus {home:.1f}kW = {ac_surplus:.1f}kW Überschuss",
             })
-        elif pv_ac > 2:
+        elif ac_surplus > 0.5:
             recommendations.append({
-                "pv_ac_available": pv_ac,
-                "battery_action": "Laden (PV-Überschuss)",
-                "ev_recommendation": "PV-Laden" if pv_ac > 4 else "Min-PV",
-                "reason": f"PV verfügbar: {pv_ac:.1f}kW",
+                "pv_ac_available": round(pv_ac, 1),
+                "surplus": round(ac_surplus + bat_charge_dc, 1),
+                "battery_action": f"Laden ({ac_surplus + bat_charge_dc:.1f}kW verf.)",
+                "ev_recommendation": "Min-PV" if ac_surplus > 1.5 else "Warten",
+                "reason": f"PV {pv_dc:.1f}kW − Haus {home:.1f}kW = {ac_surplus:.1f}kW Überschuss",
+            })
+        elif ac_deficit > 0.5:
+            recommendations.append({
+                "pv_ac_available": round(pv_ac, 1),
+                "surplus": 0,
+                "battery_action": f"Entladen ({ac_deficit:.1f}kW Defizit)",
+                "ev_recommendation": "Warten",
+                "reason": f"Haus {home:.1f}kW > PV {pv_ac:.1f}kW → Batterie",
             })
         else:
             recommendations.append({
-                "pv_ac_available": pv_ac,
+                "pv_ac_available": round(pv_ac, 1),
+                "surplus": round(ac_surplus, 1),
                 "battery_action": "Halten",
                 "ev_recommendation": "Warten",
-                "reason": f"Wenig PV ({pv_ac:.1f}kW)",
+                "reason": f"PV ≈ Verbrauch ({pv_ac:.1f} ≈ {home:.1f}kW)",
             })
 
     rec_df = pd.DataFrame(recommendations)

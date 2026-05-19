@@ -55,13 +55,18 @@ Nicht benötigte Sensoren können mit `""` deaktiviert werden.
 
 ## Web-UI
 
-Das Web-UI ist über die HA-Seitenleiste oder über **Add-on → Open Web UI** erreichbar:
+Das Web-UI ist über die HA-Seitenleiste oder über **Add-on → Open Web UI** erreichbar.
 
+### Dashboard (Hauptseite)
+- **KPI-Cards**: Add-on Status, Collector (24h + gesamt), letztes Training (R², MAE, Zeitpunkt)
+- **24/36h Vorhersage**: Chart mit PV DC (Balken), Verbrauch (Linie), GHI und Börsenstrompreis
+- **Empfehlungstabelle**: Stündlich – PV DC, Verbrauch, Überschuss, Preis, Batterie-/EV-Empfehlung
+
+### Collector & Daten (/collector)
 - **Status-Cards**: PV, Batterie, Grid, Home, Wärmepumpe, EV, Collector-Status
-- **Messwerte-Tab**: Alle Tabellenspalten der measurements-Tabelle
+- **Messwerte-Tab**: Alle Spalten der measurements-Tabelle
 - **Collector Log-Tab**: Erfolgs-/Fehlerprotokoll
-- **Zeilenauswahl**: 50, 200, 1000 oder alle Zeilen
-- Auto-Refresh alle 30 Sekunden
+- **DB Download**: SQLite-Datenbank als Datei herunterladen
 
 ## Daten
 

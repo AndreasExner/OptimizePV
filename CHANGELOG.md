@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+
+- Verbrauchsmodell (home_kwh): LightGBM Prognose des Hausverbrauchs
+- Forecast berücksichtigt jetzt Verbrauch bei Empfehlungen
+- Dashboard: Verbrauchslinie im Chart, Überschuss-Spalte in Tabelle
+- Umschaltbar zwischen 24h und 36h Vorhersage (Dropdown)
+- Fix: NaN-Preise bei 36h korrekt als null serialisiert
+- KPI: Timestamps in deutschem Kurzformat (TT.MM.JJ HH:MM)
+- KPI: Trainings-Zeitpunkt angezeigt
+- Empfehlungen mit Begründung: PV − Haus = Überschuss
+
 ## 0.6.0
 
 - Rolling 24h Vorhersage mit PV DC, Wetter und Strompreisen
