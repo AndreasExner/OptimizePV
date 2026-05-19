@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+- Web-UI: Dashboard als Hauptseite (Status, Collector, Training KPIs)
+- Web-UI: Collector-View als Unterseite (/collector)
+- Fix: Collector KPI zeigt 24h-Stats + Gesamt-Zähler
+- Training-KPI liest R²/MAE aus gespeichertem Modell
+- Navigation zwischen Dashboard und Collector
+
 ## 0.5.0
 
 - Neues ML-Modell: Target pv_dc_kwh (DC-Modulleistung direkt vom WR)

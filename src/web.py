@@ -1,6 +1,7 @@
 """OptimizePV Web-UI.
 
-Einfaches Status-Panel und Daten-Grid für das HA Add-on (Ingress).
+Dashboard (Hauptseite) + Collector-Datenansicht (Unterseite).
+Läuft als Flask/Waitress im HA Add-on via Ingress.
 """
 
 import os
@@ -12,7 +13,6 @@ from src.config import DATA_DB_PATH
 
 app = Flask(__name__)
 
-# Ingress-Pfad: HA leitet /api/hassio_ingress/<token>/ hierher
 INGRESS_PATH = os.getenv("INGRESS_PATH", "")
 
 
@@ -24,69 +24,162 @@ def _get_db():
 
 
 # ---------------------------------------------------------------------------
-# HTML Template
+# Shared Styles
 # ---------------------------------------------------------------------------
 
-TEMPLATE = """
+SHARED_STYLES = """
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       background: #1c1c1c; color: #e0e0e0; padding: 16px; }
+h1 { font-size: 1.4em; margin-bottom: 4px; color: #ffa726; }
+h2 { font-size: 1.1em; margin: 16px 0 8px; color: #90caf9; }
+a { color: #90caf9; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.nav { font-size: 0.85em; margin-bottom: 16px; color: #888; }
+.nav a { margin-right: 16px; }
+.nav a.active { color: #ffa726; font-weight: 600; }
+
+.status-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px; margin-bottom: 16px;
+}
+.card {
+    background: #2a2a2a; border-radius: 8px; padding: 16px;
+    border-left: 4px solid #555;
+}
+.card.ok { border-left-color: #66bb6a; }
+.card.warn { border-left-color: #ffa726; }
+.card.err { border-left-color: #ef5350; }
+.card.pv { border-left-color: #ffa726; }
+.card.battery { border-left-color: #66bb6a; }
+.card.grid { border-left-color: #ef5350; }
+.card.home { border-left-color: #42a5f5; }
+.card.wp { border-left-color: #ab47bc; }
+.card.ev { border-left-color: #26c6da; }
+.card.info { border-left-color: #78909c; }
+.card .label { font-size: 0.75em; color: #999; text-transform: uppercase; letter-spacing: 0.5px; }
+.card .value { font-size: 1.8em; font-weight: 600; margin: 4px 0; }
+.card .sub { font-size: 0.8em; color: #888; }
+.card .unit { font-size: 0.65em; color: #888; }
+
+.btn { background: #333; border: 1px solid #555; color: #ccc;
+       padding: 5px 14px; border-radius: 4px; cursor: pointer;
+       font-size: 0.85em; text-decoration: none; display: inline-block; }
+.btn:hover { background: #444; text-decoration: none; }
+.toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+select { background: #333; color: #ccc; border: 1px solid #555;
+         padding: 4px 8px; border-radius: 4px; font-size: 0.85em; }
+.ts { color: #888; font-size: 0.75em; }
+
+.tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.tab { padding: 6px 14px; background: #333; border: none; color: #aaa;
+       border-radius: 6px 6px 0 0; cursor: pointer; font-size: 0.85em; }
+.tab.active { background: #2a2a2a; color: #fff; }
+
+.table-wrap { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.8em; }
+th { background: #333; position: sticky; top: 0; padding: 6px 10px;
+     text-align: left; white-space: nowrap; }
+td { padding: 5px 10px; border-bottom: 1px solid #333; white-space: nowrap; }
+tr:hover td { background: #333; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+"""
+
+
+# ---------------------------------------------------------------------------
+# Dashboard Template (Hauptseite)
+# ---------------------------------------------------------------------------
+
+DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="de">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OptimizePV</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-               background: #1c1c1c; color: #e0e0e0; padding: 16px; }
-        h1 { font-size: 1.4em; margin-bottom: 12px; color: #ffa726; }
-        h2 { font-size: 1.1em; margin: 16px 0 8px; color: #90caf9; }
-
-        .status-grid {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 10px; margin-bottom: 16px;
-        }
-        .card {
-            background: #2a2a2a; border-radius: 8px; padding: 14px;
-            border-left: 4px solid #555;
-        }
-        .card.pv { border-left-color: #ffa726; }
-        .card.battery { border-left-color: #66bb6a; }
-        .card.grid { border-left-color: #ef5350; }
-        .card.home { border-left-color: #42a5f5; }
-        .card.wp { border-left-color: #ab47bc; }
-        .card.ev { border-left-color: #26c6da; }
-        .card.info { border-left-color: #78909c; }
-        .card .label { font-size: 0.75em; color: #999; text-transform: uppercase; }
-        .card .value { font-size: 1.6em; font-weight: 600; margin: 4px 0; }
-        .card .unit { font-size: 0.7em; color: #888; }
-
-        .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
-        .tab { padding: 6px 14px; background: #333; border: none; color: #aaa;
-               border-radius: 6px 6px 0 0; cursor: pointer; font-size: 0.85em; }
-        .tab.active { background: #2a2a2a; color: #fff; }
-
-        .table-wrap { overflow-x: auto; max-height: 70vh; overflow-y: auto; }
-        table { border-collapse: collapse; width: 100%; font-size: 0.8em; }
-        th { background: #333; position: sticky; top: 0; padding: 6px 10px;
-             text-align: left; white-space: nowrap; cursor: pointer; }
-        th:hover { background: #444; }
-        td { padding: 5px 10px; border-bottom: 1px solid #333; white-space: nowrap; }
-        tr:hover td { background: #333; }
-        .num { text-align: right; font-variant-numeric: tabular-nums; }
-
-        .collector-ok { color: #66bb6a; }
-        .collector-err { color: #ef5350; }
-        .refresh-btn { background: #333; border: 1px solid #555; color: #ccc;
-                       padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85em; }
-        .refresh-btn:hover { background: #444; }
-        .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-        select { background: #333; color: #ccc; border: 1px solid #555;
-                 padding: 4px 8px; border-radius: 4px; font-size: 0.85em; }
-        .ts { color: #888; font-size: 0.75em; }
-    </style>
+    <style>""" + SHARED_STYLES + """</style>
 </head>
 <body>
     <h1>⚡ OptimizePV</h1>
+    <div class="nav">
+        <a href="#" class="active">Dashboard</a>
+        <a id="nav-collector" href="#">Collector &amp; Daten</a>
+    </div>
+
+    <div class="status-grid" id="dashboard-cards">
+        <div class="card info"><div class="label">Laden...</div></div>
+    </div>
+
+    <script>
+    const BASE = window.location.pathname.replace(/\\/$/, '');
+    document.getElementById('nav-collector').href = BASE + '/collector';
+
+    async function loadDashboard() {
+        const resp = await fetch(BASE + '/api/dashboard');
+        const d = await resp.json();
+
+        const cards = document.getElementById('dashboard-cards');
+        const statusClass = d.addon_status === 'running' ? 'ok' : 'warn';
+        const collectorClass = d.collector.error_rate < 5 ? 'ok' : (d.collector.error_rate < 20 ? 'warn' : 'err');
+
+        let trainingHtml = '–';
+        if (d.training.r2 != null) {
+            trainingHtml = `
+                <div class="value">${(d.training.r2 * 100).toFixed(0)}%</div>
+                <div class="sub">R² = ${d.training.r2.toFixed(3)}</div>
+                <div class="sub">MAE = ${d.training.mae.toFixed(3)} kWh</div>
+            `;
+        } else {
+            trainingHtml = '<div class="value">–</div><div class="sub">Kein Modell</div>';
+        }
+
+        cards.innerHTML = `
+            <div class="card ${statusClass}">
+                <div class="label">Add-on Status</div>
+                <div class="value">${d.addon_status === 'running' ? '● Online' : '○ Offline'}</div>
+                <div class="sub">DB: ${d.db_size_mb.toFixed(1)} MB, ${d.measurements_total} Messwerte</div>
+            </div>
+            <div class="card ${collectorClass}">
+                <div class="label">Collector (24h)</div>
+                <div class="value">${d.collector.ok} <span class="unit">OK</span></div>
+                <div class="sub">${d.collector.errors} Fehler (${d.collector.error_rate.toFixed(1)}%), gesamt: ${d.collector.total_all_time}</div>
+                <div class="sub">Letzte Abfrage: ${d.collector.last_timestamp || '–'}</div>
+            </div>
+            <div class="card info">
+                <div class="label">Letztes Training</div>
+                ${trainingHtml}
+            </div>
+        `;
+    }
+
+    loadDashboard();
+    setInterval(loadDashboard, 30000);
+    </script>
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
+# Collector Template (Unterseite)
+# ---------------------------------------------------------------------------
+
+COLLECTOR_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OptimizePV – Collector</title>
+    <style>""" + SHARED_STYLES + """</style>
+</head>
+<body>
+    <h1>⚡ OptimizePV</h1>
+    <div class="nav">
+        <a id="nav-dashboard" href="#">Dashboard</a>
+        <a href="#" class="active">Collector &amp; Daten</a>
+    </div>
 
     <!-- Status Cards -->
     <div class="status-grid" id="status-cards">
@@ -107,8 +200,8 @@ TEMPLATE = """
             <option value="1000">1000 Zeilen</option>
             <option value="0">Alle</option>
         </select>
-        <button class="refresh-btn" onclick="loadAll()">↻ Aktualisieren</button>
-        <a class="refresh-btn" id="download-link" style="text-decoration:none">⬇ DB Download</a>
+        <button class="btn" onclick="loadAll()">↻ Aktualisieren</button>
+        <a class="btn" id="download-link">⬇ DB Download</a>
         <span class="ts" id="last-update"></span>
     </div>
 
@@ -121,7 +214,8 @@ TEMPLATE = """
     </div>
 
     <script>
-    const BASE = window.location.pathname.replace(/\\/$/, '');
+    const BASE = window.location.pathname.replace(/\\/collector\\/?$/, '');
+    document.getElementById('nav-dashboard').href = BASE + '/';
     let currentTab = 'measurements';
 
     function switchTab(tab) {
@@ -154,17 +248,17 @@ TEMPLATE = """
             <div class="card pv">
                 <div class="label">PV Leistung</div>
                 <div class="value">${fmtW(l.pv_power)}</div>
-                <div class="ts">Tagesertrag: ${fmt(l.pv_energy_daily,1)} kWh</div>
+                <div class="sub">DC: ${fmtW(l.pv_dc_power)} | Tagesertrag: ${fmt(l.pv_energy_daily,1)} kWh</div>
             </div>
             <div class="card battery">
                 <div class="label">Batterie</div>
                 <div class="value">${fmt(l.battery_soc,0)}%</div>
-                <div class="ts">${fmtW(l.battery_power)} ${l.battery_power > 0 ? '↑ Laden' : l.battery_power < 0 ? '↓ Entladen' : ''}</div>
+                <div class="sub">${fmtW(l.battery_power)} ${l.battery_power > 0 ? '↑ Laden' : l.battery_power < 0 ? '↓ Entladen' : ''}</div>
             </div>
             <div class="card grid">
                 <div class="label">Grid</div>
                 <div class="value">${fmtW(l.grid_power)}</div>
-                <div class="ts">${l.grid_power > 0 ? '↓ Bezug' : l.grid_power < 0 ? '↑ Einspeisung' : 'Ausgeglichen'}</div>
+                <div class="sub">${l.grid_power > 0 ? '↓ Bezug' : l.grid_power < 0 ? '↑ Einspeisung' : 'Ausgeglichen'}</div>
             </div>
             <div class="card home">
                 <div class="label">Hausverbrauch</div>
@@ -178,10 +272,10 @@ TEMPLATE = """
                 <div class="label">EV Laden</div>
                 <div class="value">${fmtW(l.ev_power)}</div>
             </div>
-            <div class="card info">
-                <div class="label">Collector</div>
-                <div class="value ${s.error_rate < 5 ? 'collector-ok' : 'collector-err'}">${s.ok} <span class="unit">OK</span></div>
-                <div class="ts">${s.errors} Fehler (${s.error_rate.toFixed(1)}%)</div>
+            <div class="card ${s.error_rate < 5 ? 'ok' : 'warn'}">
+                <div class="label">Collector (24h)</div>
+                <div class="value">${s.ok} <span class="unit">OK</span></div>
+                <div class="sub">${s.errors} Fehler (${s.error_rate.toFixed(1)}%) | gesamt: ${s.total_all_time}</div>
             </div>
         `;
     }
@@ -197,7 +291,7 @@ TEMPLATE = """
             return;
         }
 
-        const numCols = new Set(['pv_power','battery_soc','battery_power','grid_power',
+        const numCols = new Set(['pv_power','pv_dc_power','battery_soc','battery_power','grid_power',
             'home_power','wp_power','ev_power','pv_energy_total','pv_energy_daily',
             'grid_import_total','grid_export_total','battery_charge_total',
             'battery_discharge_total','wp_energy_total','ev_energy_total',
@@ -243,21 +337,86 @@ TEMPLATE = """
 
 @app.route("/")
 def index():
-    return render_template_string(TEMPLATE)
+    return render_template_string(DASHBOARD_TEMPLATE)
+
+
+@app.route("/collector")
+@app.route("/collector/")
+def collector_view():
+    return render_template_string(COLLECTOR_TEMPLATE)
+
+
+@app.route("/api/dashboard")
+def api_dashboard():
+    """Liefert Dashboard-KPIs: Status, Collector, Training."""
+    import joblib
+    from src.config import MODELS_DIR
+
+    db = _get_db()
+    try:
+        # Collector-Stats (24h)
+        stats_24h = db.execute(
+            """SELECT status, COUNT(*) as cnt FROM collector_log
+               WHERE timestamp >= datetime('now', '-24 hours')
+               GROUP BY status"""
+        ).fetchall()
+        counts_24h = {r["status"]: r["cnt"] for r in stats_24h}
+        total_24h = sum(counts_24h.values())
+        ok_24h = counts_24h.get("ok", 0)
+        errors_24h = counts_24h.get("error", 0) + counts_24h.get("timeout", 0)
+
+        # Gesamt-Zähler
+        total_all = db.execute("SELECT COUNT(*) FROM collector_log").fetchone()[0]
+        measurements_total = db.execute("SELECT COUNT(*) FROM measurements").fetchone()[0]
+
+        # Letzte Abfrage
+        last_row = db.execute(
+            "SELECT timestamp FROM measurements ORDER BY timestamp DESC LIMIT 1"
+        ).fetchone()
+        last_ts = last_row["timestamp"] if last_row else None
+
+        # DB-Größe
+        db_size_mb = DATA_DB_PATH.stat().st_size / (1024 * 1024) if DATA_DB_PATH.exists() else 0
+
+        # Training-Infos
+        model_path = MODELS_DIR / "pv_forecast.joblib"
+        training = {"r2": None, "mae": None}
+        if model_path.exists():
+            try:
+                model_data = joblib.load(model_path)
+                metrics = model_data.get("metrics", {})
+                training["r2"] = metrics.get("test_r2")
+                training["mae"] = metrics.get("test_mae")
+            except Exception:
+                pass
+
+        return jsonify({
+            "addon_status": "running",
+            "db_size_mb": db_size_mb,
+            "measurements_total": measurements_total,
+            "collector": {
+                "total_24h": total_24h, "ok": ok_24h, "errors": errors_24h,
+                "error_rate": errors_24h / total_24h * 100 if total_24h > 0 else 0,
+                "total_all_time": total_all,
+                "last_timestamp": last_ts,
+            },
+            "training": training,
+        })
+    finally:
+        db.close()
 
 
 @app.route("/api/status")
 def api_status():
-    """Liefert aktuelle Werte und Collector-Statistiken."""
+    """Liefert aktuelle Werte und Collector-Statistiken für Collector-View."""
     db = _get_db()
     try:
-        # Letzter Messwert
         row = db.execute(
             "SELECT * FROM measurements ORDER BY timestamp DESC LIMIT 1"
         ).fetchone()
         latest = dict(row) if row else None
 
-        # Collector-Stats (letzte 24h)
+        # 24h Stats
         stats = db.execute(
             """SELECT status, COUNT(*) as cnt FROM collector_log
                WHERE timestamp >= datetime('now', '-24 hours')
@@ -268,11 +427,15 @@ def api_status():
         ok = counts.get("ok", 0)
         errors = counts.get("error", 0) + counts.get("timeout", 0)
 
+        # Gesamt
+        total_all = db.execute("SELECT COUNT(*) FROM collector_log WHERE status = 'ok'").fetchone()[0]
+
         return jsonify({
             "latest": latest,
             "collector": {
                 "total": total, "ok": ok, "errors": errors,
                 "error_rate": errors / total * 100 if total > 0 else 0,
+                "total_all_time": total_all,
             },
         })
     finally:
@@ -281,8 +444,7 @@ def api_status():
 
 @app.route("/api/table/<table_name>")
 def api_table(table_name):
-    """Liefert Tabellendaten als JSON (Spalten + Zeilen)."""
-    # Whitelist: nur erlaubte Tabellen
+    """Liefert Tabellendaten als JSON."""
     allowed = {"measurements", "collector_log"}
     if table_name not in allowed:
         return jsonify({"error": "Tabelle nicht erlaubt"}), 400
@@ -301,7 +463,6 @@ def api_table(table_name):
 
         columns = list(rows[0].keys())
         data = [list(row) for row in rows]
-
         return jsonify({"columns": columns, "rows": data})
     finally:
         db.close()
@@ -311,11 +472,10 @@ def api_table(table_name):
 def api_download():
     """Liefert die SQLite-DB als Download."""
     from flask import send_file
-    db_path = str(DATA_DB_PATH)
     if not DATA_DB_PATH.exists():
         return jsonify({"error": "Datenbank nicht gefunden"}), 404
     return send_file(
-        db_path,
+        str(DATA_DB_PATH),
         mimetype="application/x-sqlite3",
         as_attachment=True,
         download_name="optimizepv.db",
