@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Web-UI: DB Download-Button in der Toolbar
+- Backup der Datenbank direkt aus dem Browser
+
 ## 0.4.1
 
 - Lint-Warnungen bereinigt (unused imports, fehlende encoding)

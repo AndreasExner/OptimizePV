@@ -108,6 +108,7 @@ TEMPLATE = """
             <option value="0">Alle</option>
         </select>
         <button class="refresh-btn" onclick="loadAll()">↻ Aktualisieren</button>
+        <a class="refresh-btn" id="download-link" style="text-decoration:none">⬇ DB Download</a>
         <span class="ts" id="last-update"></span>
     </div>
 
@@ -224,7 +225,10 @@ TEMPLATE = """
             'Aktualisiert: ' + new Date().toLocaleTimeString('de-DE');
     }
 
-    function loadAll() { loadStatus(); loadTable(); }
+    function loadAll() {
+        loadStatus(); loadTable();
+        document.getElementById('download-link').href = BASE + '/api/download';
+    }
     loadAll();
     setInterval(loadStatus, 30000);
     </script>
@@ -301,6 +305,21 @@ def api_table(table_name):
         return jsonify({"columns": columns, "rows": data})
     finally:
         db.close()
+
+
+@app.route("/api/download")
+def api_download():
+    """Liefert die SQLite-DB als Download."""
+    from flask import send_file
+    db_path = str(DATA_DB_PATH)
+    if not DATA_DB_PATH.exists():
+        return jsonify({"error": "Datenbank nicht gefunden"}), 404
+    return send_file(
+        db_path,
+        mimetype="application/x-sqlite3",
+        as_attachment=True,
+        download_name="optimizepv.db",
+    )
 
 
 def run_web(host: str = "0.0.0.0", port: int = 8099):
