@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1
+
+- CLI: `retrain` Befehl zum Trainieren der Modelle auf dem Zielsystem
+- Modelle werden in /data/models/ gespeichert (persistentes Volume auf HA)
+- MODELS_DIR per Umgebungsvariable konfigurierbar
+
 ## 0.7.0
 
 - Verbrauchsmodell (home_kwh): LightGBM Prognose des Hausverbrauchs

@@ -13,7 +13,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 DATA_RAW = PROJECT_ROOT / "data" / "raw"
 DATA_PROCESSED = PROJECT_ROOT / "data" / "processed"
 DATA_EXPORTS = PROJECT_ROOT / "data" / "exports"
-MODELS_DIR = PROJECT_ROOT / "models"
+MODELS_DIR = Path(os.getenv("MODELS_DIR", str(PROJECT_ROOT / "models")))
 
 # Eigene Datenbank (Collector)
 DATA_DB_PATH = Path(os.getenv("DATA_DB_PATH", str(PROJECT_ROOT / "data" / "optimizepv.db")))

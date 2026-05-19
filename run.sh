@@ -5,6 +5,8 @@
 export HA_URL="http://supervisor/core/api"
 export HA_TOKEN="${SUPERVISOR_TOKEN}"
 export DATA_DB_PATH="/data/optimizepv.db"
+export MODELS_DIR="/data/models"
+mkdir -p "${MODELS_DIR}"
 
 # Konfiguration aus HA Add-on Options lesen (/data/options.json)
 if [ -f /data/options.json ]; then
