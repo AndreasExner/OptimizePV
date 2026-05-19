@@ -38,9 +38,13 @@ python -c "from src.data.collector import init_db; init_db()" 2>/dev/null
 python -m src.web &
 echo "  Web-UI:     Port 8099 (Ingress)"
 
-# Forecast-Scheduler starten (Hintergrund, stündlich)
+# Forecast-Scheduler starten (Hintergrund, stündlich zur vollen Stunde)
 python -c "from src.forecast import run_forecast_scheduler; run_forecast_scheduler()" &
 echo "  Forecast:   Stündlich (Hintergrund)"
+
+# Retraining-Scheduler starten (Hintergrund, wöchentlich Montag 00:30 UTC)
+python -c "from src.main import run_retrain_scheduler; run_retrain_scheduler()" &
+echo "  Retraining: Montag 00:30 UTC (Hintergrund)"
 
 # Collector starten (Vordergrund)
 exec python -m src.main --log-level "${LOG_LEVEL}" collect --interval "${COLLECTOR_INTERVAL}"

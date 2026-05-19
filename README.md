@@ -13,8 +13,10 @@ Lokale ML-basierte Optimierung einer privaten PV-Anlage. Maximiert den Eigenverb
 - **Daten-Collector**: Sammelt PV-, Batterie-, Grid- und Verbrauchsdaten über Home Assistant (5-Min-Intervall)
 - **ML-Prognose PV**: LightGBM-Modell sagt PV-DC-Modulleistung voraus (stündlich, 24/36h)
 - **ML-Prognose Verbrauch**: Zweites Modell für Hausverbrauch (Haushalt + WP)
-- **Optimierung**: Empfehlungen für Batterie und EV basierend auf PV-Überschuss und Strompreis
+- **Forecast-Scheduler**: Stündliche Vorhersage mit Wetter, PV, Verbrauch und Strompreisen
+- **Retraining**: Wöchentliches automatisches Retraining (Montag 00:30 UTC) + manuell per UI
 - **Dashboard**: Chart mit PV-Prognose, Verbrauch, Globalstrahlung und Börsenstrompreis
+- **Modell-Historie**: Training-Metriken, Trend-Charts, Feature Importance
 - **HA Add-on**: Installierbar als Home Assistant Add-on (Docker, Multi-Arch)
 
 ## Architektur

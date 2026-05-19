@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Schema
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS measurements (
@@ -88,6 +88,30 @@ CREATE TABLE IF NOT EXISTS forecasts (
 
 CREATE INDEX IF NOT EXISTS idx_forecasts_target ON forecasts(target_time);
 CREATE INDEX IF NOT EXISTS idx_forecasts_created ON forecasts(created_at);
+
+CREATE TABLE IF NOT EXISTS training_history (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    trained_at      TEXT    NOT NULL,
+    duration_s      REAL,
+    model_type      TEXT    NOT NULL,  -- 'pv' oder 'consumption'
+    samples         INTEGER,
+    features_used   INTEGER,
+    data_days       REAL,
+    data_start      TEXT,
+    data_end        TEXT,
+    train_mae       REAL,
+    train_rmse      REAL,
+    train_r2        REAL,
+    test_mae        REAL,
+    test_rmse       REAL,
+    test_r2         REAL,
+    baseline_mae    REAL,
+    vs_baseline_pct REAL,
+    feature_importance TEXT,  -- JSON
+    model_path      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_training_history_at ON training_history(trained_at);
 
 CREATE TABLE IF NOT EXISTS schema_info (
     version INTEGER NOT NULL
@@ -188,6 +212,21 @@ def _migrate_db(conn: sqlite3.Connection, from_version: int) -> None:
             CREATE INDEX IF NOT EXISTS idx_forecasts_created ON forecasts(created_at);
         """)
         logger.info("DB migriert: v%d → v6", from_version)
+    if from_version < 7:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS training_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trained_at TEXT NOT NULL, duration_s REAL,
+                model_type TEXT NOT NULL, samples INTEGER, features_used INTEGER,
+                data_days REAL, data_start TEXT, data_end TEXT,
+                train_mae REAL, train_rmse REAL, train_r2 REAL,
+                test_mae REAL, test_rmse REAL, test_r2 REAL,
+                baseline_mae REAL, vs_baseline_pct REAL,
+                feature_importance TEXT, model_path TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_training_history_at ON training_history(trained_at);
+        """)
+        logger.info("DB migriert: v%d → v7", from_version)
 
 
 def store_measurement(data: dict, db_path: Path | None = None) -> None:

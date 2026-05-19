@@ -68,6 +68,17 @@ Das Web-UI ist über die HA-Seitenleiste oder über **Add-on → Open Web UI** e
 - **Collector Log-Tab**: Erfolgs-/Fehlerprotokoll
 - **DB Download**: SQLite-Datenbank als Datei herunterladen
 
+### Modell-Historie (/training)
+- **Letztes Training**: KPIs für PV- und Verbrauchsmodell (R², MAE, RMSE, vs. Baseline, Samples, Dauer)
+- **Trend-Charts**: R² und MAE Verlauf über alle Trainings
+- **Feature Importance**: Balkendiagramm der Top-15 Features pro Modell
+- **Trainings-Tabelle**: Alle Trainings mit Metriken
+- **Manuelles Training**: Button zum sofortigen Retraining
+
+### Forecast-DB (/forecasts)
+- **Forecast-Tabelle**: Alle gespeicherten Vorhersagen mit Timestamps im deutschen Kurzformat
+- **Manueller Forecast**: Button zum sofortigen Erstellen eines neuen Forecasts
+
 ## Daten
 
 Alle gesammelten Daten werden in `/data/optimizepv.db` (SQLite) gespeichert.

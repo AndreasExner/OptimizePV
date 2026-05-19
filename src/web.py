@@ -119,6 +119,8 @@ DASHBOARD_TEMPLATE = """
     <div class="nav">
         <a href="#" class="active">Dashboard</a>
         <a id="nav-collector" href="#">Collector &amp; Daten</a>
+        <a id="nav-training" href="#">Modell-Historie</a>
+        <a id="nav-forecasts" href="#">Forecast-DB</a>
     </div>
 
     <div class="status-grid" id="dashboard-cards">
@@ -146,6 +148,8 @@ DASHBOARD_TEMPLATE = """
     <script>
     const BASE = window.location.pathname.replace(/\\/$/, '');
     document.getElementById('nav-collector').href = BASE + '/collector';
+    document.getElementById('nav-training').href = BASE + '/training';
+    document.getElementById('nav-forecasts').href = BASE + '/forecasts';
     let forecastChart = null;
 
     function fmtTs(ts) {
@@ -359,6 +363,8 @@ COLLECTOR_TEMPLATE = """
     <div class="nav">
         <a id="nav-dashboard" href="#">Dashboard</a>
         <a href="#" class="active">Collector &amp; Daten</a>
+        <a id="nav-training" href="#">Modell-Historie</a>
+        <a id="nav-forecasts" href="#">Forecast-DB</a>
     </div>
 
     <!-- Status Cards -->
@@ -396,6 +402,8 @@ COLLECTOR_TEMPLATE = """
     <script>
     const BASE = window.location.pathname.replace(/\\/collector\\/?$/, '');
     document.getElementById('nav-dashboard').href = BASE + '/';
+    document.getElementById('nav-training').href = BASE + '/training';
+    document.getElementById('nav-forecasts').href = BASE + '/forecasts';
     let currentTab = 'measurements';
 
     function switchTab(tab) {
@@ -526,6 +534,18 @@ def collector_view():
     return render_template_string(COLLECTOR_TEMPLATE)
 
 
+@app.route("/training")
+@app.route("/training/")
+def training_view():
+    return render_template_string(TRAINING_TEMPLATE)
+
+
+@app.route("/forecasts")
+@app.route("/forecasts/")
+def forecasts_view():
+    return render_template_string(FORECASTS_TEMPLATE)
+
+
 @app.route("/api/dashboard")
 def api_dashboard():
     """Liefert Dashboard-KPIs: Status, Collector, Training."""
@@ -609,6 +629,36 @@ def api_forecast():
     return jsonify({"forecast": records})
 
 
+@app.route("/api/forecast/run", methods=["POST"])
+def api_forecast_run():
+    """Erstellt einen neuen Forecast und speichert ihn in der DB."""
+    from src.forecast import run_forecast_once
+    ok = run_forecast_once()
+    if ok:
+        return jsonify({"status": "Forecast erstellt"})
+    return jsonify({"status": "Forecast fehlgeschlagen"}), 500
+
+
+@app.route("/api/forecast/history")
+def api_forecast_history():
+    """Liefert alle Forecast-Einträge aus der DB."""
+    limit = request.args.get("limit", "200", type=str)
+    limit_clause = f"LIMIT {int(limit)}" if limit != "0" else ""
+
+    db = _get_db()
+    try:
+        rows = db.execute(
+            f"SELECT * FROM forecasts ORDER BY created_at DESC, target_time ASC {limit_clause}"
+        ).fetchall()
+        if not rows:
+            return jsonify({"columns": [], "rows": []})
+        columns = list(rows[0].keys())
+        data = [list(row) for row in rows]
+        return jsonify({"columns": columns, "rows": data})
+    finally:
+        db.close()
+
+
 @app.route("/api/status")
 def api_status():
     """Liefert aktuelle Werte und Collector-Statistiken für Collector-View."""
@@ -683,6 +733,358 @@ def api_download():
         as_attachment=True,
         download_name="optimizepv.db",
     )
+
+
+@app.route("/api/training")
+def api_training():
+    """Liefert Training-Historie aus der DB."""
+    db = _get_db()
+    try:
+        rows = db.execute(
+            "SELECT * FROM training_history ORDER BY trained_at DESC LIMIT 50"
+        ).fetchall()
+        records = [dict(r) for r in rows] if rows else []
+        return jsonify({"history": records})
+    except Exception:
+        return jsonify({"history": []})
+    finally:
+        db.close()
+
+
+@app.route("/api/retrain", methods=["POST"])
+def api_retrain():
+    """Startet ein manuelles Training (async im Hintergrund)."""
+    import threading
+    from src.main import _run_training, setup_logging
+
+    def _train_bg():
+        setup_logging("INFO")
+        _run_training()
+
+    t = threading.Thread(target=_train_bg, daemon=True)
+    t.start()
+    return jsonify({"status": "Training gestartet"})
+
+
+# ---------------------------------------------------------------------------
+# Training Template
+# ---------------------------------------------------------------------------
+
+TRAINING_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OptimizePV – Modell-Historie</title>
+    <style>""" + SHARED_STYLES + """
+    .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 16px; }
+    .metric { background: #2a2a2a; border-radius: 6px; padding: 10px; text-align: center; }
+    .metric .label { font-size: 0.7em; color: #999; text-transform: uppercase; }
+    .metric .value { font-size: 1.4em; font-weight: 600; margin: 2px 0; }
+    .metric .sub { font-size: 0.75em; color: #888; }
+    .chart-container { background: #2a2a2a; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    @media (max-width: 800px) { .chart-row { grid-template-columns: 1fr; } }
+    .training-btn { background: #1b5e20; border: none; color: #a5d6a7; padding: 8px 20px;
+                    border-radius: 6px; cursor: pointer; font-size: 0.9em; font-weight: 600; }
+    .training-btn:hover { background: #2e7d32; }
+    .training-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <h1>⚡ OptimizePV</h1>
+    <div class="nav">
+        <a id="nav-dashboard" href="#">Dashboard</a>
+        <a id="nav-collector" href="#">Collector &amp; Daten</a>
+        <a href="#" class="active">Modell-Historie</a>
+        <a id="nav-forecasts" href="#">Forecast-DB</a>
+    </div>
+
+    <div class="toolbar">
+        <button class="training-btn" id="train-btn" onclick="startTraining()">▶ Training starten</button>
+        <span class="ts" id="train-status"></span>
+    </div>
+
+    <!-- Letztes Training KPIs -->
+    <h2>Letztes Training – PV-Modell</h2>
+    <div class="metric-grid" id="pv-metrics"></div>
+
+    <h2>Letztes Training – Verbrauchsmodell</h2>
+    <div class="metric-grid" id="cons-metrics"></div>
+
+    <!-- Charts -->
+    <div class="chart-row">
+        <div class="chart-container">
+            <h2>R² Verlauf</h2>
+            <canvas id="r2-chart"></canvas>
+        </div>
+        <div class="chart-container">
+            <h2>MAE Verlauf</h2>
+            <canvas id="mae-chart"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-row">
+        <div class="chart-container">
+            <h2>Feature Importance – PV</h2>
+            <canvas id="fi-pv-chart"></canvas>
+        </div>
+        <div class="chart-container">
+            <h2>Feature Importance – Verbrauch</h2>
+            <canvas id="fi-cons-chart"></canvas>
+        </div>
+    </div>
+
+    <!-- Trainings-Tabelle -->
+    <h2>Alle Trainings</h2>
+    <div class="table-wrap">
+        <table class="rec-table" id="history-table"></table>
+    </div>
+
+    <script>
+    const BASE = window.location.pathname.replace(/\\/training\\/?$/, '');
+    document.getElementById('nav-dashboard').href = BASE + '/';
+    document.getElementById('nav-collector').href = BASE + '/collector';
+    document.getElementById('nav-forecasts').href = BASE + '/forecasts';
+
+    let r2Chart = null, maeChart = null, fiPvChart = null, fiConsChart = null;
+
+    function fmtTs(ts) {
+        if (!ts) return '–';
+        const d = new Date(ts);
+        return d.toLocaleDateString('de-DE', {day:'2-digit', month:'2-digit', year:'2-digit'})
+             + ' ' + d.toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
+    }
+
+    function renderMetrics(containerId, entry) {
+        const el = document.getElementById(containerId);
+        if (!entry) { el.innerHTML = '<div class="metric"><div class="label">Keine Daten</div></div>'; return; }
+        const vs = entry.vs_baseline_pct != null ? `${entry.vs_baseline_pct > 0 ? '+' : ''}${entry.vs_baseline_pct.toFixed(1)}%` : '–';
+        const vsClass = entry.vs_baseline_pct > 0 ? 'color:#66bb6a' : (entry.vs_baseline_pct < 0 ? 'color:#ef5350' : '');
+        el.innerHTML = `
+            <div class="metric"><div class="label">R²</div><div class="value">${(entry.test_r2*100).toFixed(0)}%</div><div class="sub">${entry.test_r2.toFixed(4)}</div></div>
+            <div class="metric"><div class="label">MAE</div><div class="value">${entry.test_mae.toFixed(3)}</div><div class="sub">kWh</div></div>
+            <div class="metric"><div class="label">RMSE</div><div class="value">${entry.test_rmse.toFixed(3)}</div><div class="sub">kWh</div></div>
+            <div class="metric"><div class="label">vs. Baseline</div><div class="value" style="${vsClass}">${vs}</div></div>
+            <div class="metric"><div class="label">Samples</div><div class="value">${entry.samples}</div><div class="sub">${entry.data_days?.toFixed(0) || '?'} Tage</div></div>
+            <div class="metric"><div class="label">Features</div><div class="value">${entry.features_used}</div></div>
+            <div class="metric"><div class="label">Dauer</div><div class="value">${entry.duration_s?.toFixed(1) || '?'}s</div></div>
+            <div class="metric"><div class="label">Trainiert</div><div class="value" style="font-size:0.9em">${fmtTs(entry.trained_at)}</div></div>
+        `;
+    }
+
+    function renderFeatureImportance(canvasId, chartRef, entry) {
+        if (!entry || !entry.feature_importance) return null;
+        let fi;
+        try { fi = JSON.parse(entry.feature_importance); } catch(e) { return null; }
+        if (!fi.length) return null;
+        const ctx = document.getElementById(canvasId).getContext('2d');
+        if (chartRef) chartRef.destroy();
+        return new Chart(ctx, {
+            type: 'bar', data: {
+                labels: fi.map(f => f.feature),
+                datasets: [{ data: fi.map(f => f.importance), backgroundColor: 'rgba(66,165,245,0.7)', borderWidth: 0 }]
+            },
+            options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } },
+                       scales: { x: { ticks: { color: '#999' }, grid: { color: '#333' } }, y: { ticks: { color: '#ccc', font: { size: 10 } } } } }
+        });
+    }
+
+    function renderTrendCharts(history) {
+        const pv = history.filter(h => h.model_type === 'pv').reverse();
+        const cons = history.filter(h => h.model_type === 'consumption').reverse();
+        const labels = pv.map(h => fmtTs(h.trained_at));
+
+        const ctx1 = document.getElementById('r2-chart').getContext('2d');
+        if (r2Chart) r2Chart.destroy();
+        r2Chart = new Chart(ctx1, { type: 'line', data: {
+            labels, datasets: [
+                { label: 'PV R²', data: pv.map(h => h.test_r2), borderColor: '#ffa726', borderWidth: 2, pointRadius: 3 },
+                { label: 'Verbr. R²', data: cons.map(h => h.test_r2), borderColor: '#42a5f5', borderWidth: 2, pointRadius: 3 },
+            ]}, options: { responsive: true, scales: { y: { min: 0, max: 1, ticks: { color: '#999' }, grid: { color: '#333' } }, x: { ticks: { color: '#999', font: { size: 9 } } } },
+                plugins: { legend: { labels: { color: '#ccc' } } } }
+        });
+
+        const ctx2 = document.getElementById('mae-chart').getContext('2d');
+        if (maeChart) maeChart.destroy();
+        maeChart = new Chart(ctx2, { type: 'line', data: {
+            labels, datasets: [
+                { label: 'PV MAE', data: pv.map(h => h.test_mae), borderColor: '#ffa726', borderWidth: 2, pointRadius: 3 },
+                { label: 'Verbr. MAE', data: cons.map(h => h.test_mae), borderColor: '#42a5f5', borderWidth: 2, pointRadius: 3 },
+            ]}, options: { responsive: true, scales: { y: { min: 0, ticks: { color: '#999' }, grid: { color: '#333' } }, x: { ticks: { color: '#999', font: { size: 9 } } } },
+                plugins: { legend: { labels: { color: '#ccc' } } } }
+        });
+    }
+
+    function renderHistoryTable(history) {
+        const table = document.getElementById('history-table');
+        let html = '<thead><tr><th>Zeitpunkt</th><th>Modell</th><th>R²</th><th>MAE</th><th>vs.Base</th><th>Samples</th><th>Tage</th><th>Dauer</th></tr></thead><tbody>';
+        history.forEach(h => {
+            const vs = h.vs_baseline_pct != null ? `${h.vs_baseline_pct > 0 ? '+' : ''}${h.vs_baseline_pct.toFixed(1)}%` : '–';
+            html += `<tr>
+                <td>${fmtTs(h.trained_at)}</td>
+                <td>${h.model_type === 'pv' ? '☀️ PV' : '🏠 Verbr.'}</td>
+                <td class="num">${(h.test_r2*100).toFixed(1)}%</td>
+                <td class="num">${h.test_mae.toFixed(3)}</td>
+                <td class="num">${vs}</td>
+                <td class="num">${h.samples}</td>
+                <td class="num">${h.data_days?.toFixed(0) || '?'}</td>
+                <td class="num">${h.duration_s?.toFixed(1) || '?'}s</td>
+            </tr>`;
+        });
+        html += '</tbody>';
+        table.innerHTML = html;
+    }
+
+    async function loadTraining() {
+        const resp = await fetch(BASE + '/api/training');
+        const data = await resp.json();
+        const h = data.history || [];
+
+        const latestPv = h.find(e => e.model_type === 'pv');
+        const latestCons = h.find(e => e.model_type === 'consumption');
+
+        renderMetrics('pv-metrics', latestPv);
+        renderMetrics('cons-metrics', latestCons);
+        fiPvChart = renderFeatureImportance('fi-pv-chart', fiPvChart, latestPv);
+        fiConsChart = renderFeatureImportance('fi-cons-chart', fiConsChart, latestCons);
+        if (h.length > 0) renderTrendCharts(h);
+        renderHistoryTable(h);
+    }
+
+    async function startTraining() {
+        const btn = document.getElementById('train-btn');
+        const status = document.getElementById('train-status');
+        btn.disabled = true;
+        btn.textContent = '⏳ Training läuft...';
+        status.textContent = '';
+        try {
+            const resp = await fetch(BASE + '/api/retrain', { method: 'POST' });
+            const data = await resp.json();
+            status.textContent = data.status + ' – Seite wird in 30s aktualisiert...';
+            setTimeout(() => { loadTraining(); btn.disabled = false; btn.textContent = '▶ Training starten'; status.textContent = ''; }, 30000);
+        } catch (e) {
+            status.textContent = 'Fehler: ' + e.message;
+            btn.disabled = false;
+            btn.textContent = '▶ Training starten';
+        }
+    }
+
+    loadTraining();
+    </script>
+</body>
+</html>
+"""
+
+
+FORECASTS_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OptimizePV – Forecast-DB</title>
+    <style>""" + SHARED_STYLES + """</style>
+</head>
+<body>
+    <h1>⚡ OptimizePV</h1>
+    <div class="nav">
+        <a id="nav-dashboard" href="#">Dashboard</a>
+        <a id="nav-collector" href="#">Collector &amp; Daten</a>
+        <a id="nav-training" href="#">Modell-Historie</a>
+        <a href="#" class="active">Forecast-DB</a>
+    </div>
+
+    <div class="toolbar">
+        <button class="btn" id="fc-btn" onclick="runForecast()" style="background:#1b5e20;color:#a5d6a7;font-weight:600">▶ Forecast erstellen</button>
+        <select id="fc-limit" onchange="loadForecasts()">
+            <option value="200">200 Zeilen</option>
+            <option value="500">500 Zeilen</option>
+            <option value="0">Alle</option>
+        </select>
+        <button class="btn" onclick="loadForecasts()">↻ Aktualisieren</button>
+        <span class="ts" id="fc-status"></span>
+    </div>
+
+    <div class="table-wrap">
+        <table id="fc-table">
+            <thead><tr><th>Laden...</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <script>
+    const BASE = window.location.pathname.replace(/\\/forecasts\\/?$/, '');
+    document.getElementById('nav-dashboard').href = BASE + '/';
+    document.getElementById('nav-collector').href = BASE + '/collector';
+    document.getElementById('nav-training').href = BASE + '/training';
+
+    function fmtTs(ts) {
+        if (!ts) return '–';
+        const d = new Date(ts);
+        return d.toLocaleDateString('de-DE', {day:'2-digit', month:'2-digit', year:'2-digit'})
+             + ' ' + d.toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
+    }
+
+    const tsCols = new Set(['target_time', 'created_at']);
+
+    async function loadForecasts() {
+        const limit = document.getElementById('fc-limit').value;
+        const resp = await fetch(BASE + '/api/forecast/history?limit=' + limit);
+        const data = await resp.json();
+        const table = document.getElementById('fc-table');
+
+        if (!data.columns || !data.rows.length) {
+            table.innerHTML = '<thead><tr><th>Keine Daten</th></tr></thead>';
+            return;
+        }
+
+        const numCols = new Set(['ghi','pv_dc_forecast','home_forecast','price_eur_mwh','pv_ac_available','surplus']);
+
+        let html = '<thead><tr>';
+        data.columns.forEach(c => html += '<th>' + c + '</th>');
+        html += '</tr></thead><tbody>';
+
+        data.rows.forEach(row => {
+            html += '<tr>';
+            data.columns.forEach((c, i) => {
+                const cls = numCols.has(c) ? ' class="num"' : '';
+                let val = row[i];
+                if (val == null) val = '';
+                else if (tsCols.has(c)) val = fmtTs(val);
+                else if (numCols.has(c) && typeof val === 'number') val = Number(val).toFixed(2);
+                html += '<td' + cls + '>' + val + '</td>';
+            });
+            html += '</tr>';
+        });
+        html += '</tbody>';
+        table.innerHTML = html;
+    }
+
+    async function runForecast() {
+        const btn = document.getElementById('fc-btn');
+        const status = document.getElementById('fc-status');
+        btn.disabled = true;
+        btn.textContent = '⏳ Erstelle Forecast...';
+        try {
+            const resp = await fetch(BASE + '/api/forecast/run', { method: 'POST' });
+            const data = await resp.json();
+            status.textContent = data.status;
+            loadForecasts();
+        } catch (e) {
+            status.textContent = 'Fehler: ' + e.message;
+        }
+        btn.disabled = false;
+        btn.textContent = '▶ Forecast erstellen';
+    }
+
+    loadForecasts();
+    </script>
+</body>
+</html>
+"""
 
 
 def run_web(host: str = "0.0.0.0", port: int = 8099):

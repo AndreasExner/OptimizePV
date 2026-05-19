@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0
+
+- Forecast-Scheduler: Stündlich zur vollen Stunde, Ergebnisse in DB gespeichert
+- Retraining-Scheduler: Wöchentlich Montag 00:30 UTC, Ergebnisse in DB protokolliert
+- Training-Historie: Neue DB-Tabelle mit R², MAE, RMSE, Baseline, Feature Importance
+- Web-UI: Neue Seite "Modell-Historie" mit KPIs, Trend-Charts, Feature Importance
+- Web-UI: Neue Seite "Forecast-DB" mit Tabelle und manuellem Forecast-Button
+- Web-UI: Manuelles Training und Forecast per Button auslösbar
+- Web-UI: Navigation auf allen Seiten vollständig (4 Menüpunkte)
+- Web-UI: Timestamps in deutschem Kurzformat
+- Verbrauchsmodell: LightGBM für home_kwh, in Forecast integriert
+- Empfehlungen berücksichtigen Verbrauch (PV − Haus = Überschuss)
+- Dashboard: Verbrauchslinie im Chart, Überschuss-Spalte
+- Umschaltbar 24h/36h Forecast
+- DB Schema v7: forecasts + training_history Tabellen
+
 ## 0.7.2
 
 - Verbessertes Logging: Modell-Pfade und Vorhersage-Status im Forecast

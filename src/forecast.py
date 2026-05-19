@@ -383,16 +383,22 @@ def run_forecast_once(db_path: Path | None = None) -> bool:
 
 def run_forecast_scheduler(
     db_path: Path | None = None,
-    interval_seconds: int = 3600,
 ) -> None:
-    """Startet den Forecast-Scheduler als Endlosschleife (stuendlich)."""
+    """Startet den Forecast-Scheduler – läuft zur vollen Stunde."""
     import time
 
-    logger.info("Forecast-Scheduler gestartet (interval=%ds)", interval_seconds)
+    logger.info("Forecast-Scheduler gestartet (zur vollen Stunde)")
 
     # Sofort beim Start einen Forecast erstellen
     run_forecast_once(db_path)
 
     while True:
-        time.sleep(interval_seconds)
+        # Warten bis zur nächsten vollen Stunde + 1 Min Puffer
+        now = datetime.now(timezone.utc)
+        next_hour = now.replace(minute=1, second=0, microsecond=0)
+        if next_hour <= now:
+            next_hour += pd.Timedelta(hours=1)
+        wait = (next_hour - now).total_seconds()
+        logger.debug("Nächster Forecast in %.0f Sekunden (%s)", wait, next_hour)
+        time.sleep(wait)
         run_forecast_once(db_path)
