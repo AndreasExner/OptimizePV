@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- Neues ML-Modell: Target pv_dc_kwh (DC-Modulleistung direkt vom WR)
+- Training mit Collector-Daten (7 Tage, 2046 Messwerte)
+- Performance: MAE=0.55 kWh, R²=0.73, +38% vs. Baseline
+- Feature Engineering: pv_dc_power in stündlicher Aggregation
+- Anlagen-Analyse: WR-Clipping, Batterie-Auslastung, Optimierungspotenzial
+- Notebook 04: Training mit Collector-Daten
+
 ## 0.4.2
 
 - Web-UI: DB Download-Button in der Toolbar

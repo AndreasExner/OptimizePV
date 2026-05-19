@@ -191,7 +191,7 @@ def build_training_dataset(
     return df
 
 
-# Feature-Spalten für das Modell (Target: pv_module_kwh)
+# Feature-Spalten für das Modell (Target: pv_dc_kwh)
 FEATURE_COLS = [
     # Wetter
     "shortwave_radiation", "direct_radiation", "diffuse_radiation",
@@ -199,18 +199,18 @@ FEATURE_COLS = [
     # Zeit
     "hour", "day_of_year", "month", "weekday", "is_weekend",
     "hour_sin", "hour_cos", "doy_sin", "doy_cos",
-    # Lag PV-Modul
-    "pv_module_kwh_lag1", "pv_module_kwh_lag2", "pv_module_kwh_lag3",
-    "pv_module_kwh_lag24",
+    # Lag PV DC
+    "pv_dc_kwh_lag1", "pv_dc_kwh_lag2", "pv_dc_kwh_lag3",
+    "pv_dc_kwh_lag24",
     # Lag Verbrauch
     "home_kwh_lag1", "home_kwh_lag24",
-    # Rolling PV-Modul
-    "pv_module_kwh_rmean3", "pv_module_kwh_rstd3",
-    "pv_module_kwh_rmean6", "pv_module_kwh_rstd6",
-    "pv_module_kwh_rmean24", "pv_module_kwh_rstd24",
+    # Rolling PV DC
+    "pv_dc_kwh_rmean3", "pv_dc_kwh_rstd3",
+    "pv_dc_kwh_rmean6", "pv_dc_kwh_rstd6",
+    "pv_dc_kwh_rmean24", "pv_dc_kwh_rstd24",
 ]
 
-TARGET_COL = "pv_module_kwh"
+TARGET_COL = "pv_dc_kwh"
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +267,7 @@ def build_hourly_from_collector(df: pd.DataFrame) -> pd.DataFrame:
     df["hour_start"] = df["timestamp"].dt.floor("h")
 
     # --- Leistung: Durchschnitt pro Stunde → kW → kWh (da 1h Intervall) ---
-    power_cols = ["pv_power", "pv_module_power", "battery_power", "grid_power",
+    power_cols = ["pv_power", "pv_dc_power", "pv_module_power", "battery_power", "grid_power",
                   "home_power", "wp_power", "ev_power"]
     agg_dict = {col: "mean" for col in power_cols if col in df.columns}
     agg_dict["battery_soc"] = "mean"
