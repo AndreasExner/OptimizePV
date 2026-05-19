@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0
+
+- Rolling 24h Vorhersage mit PV DC, Wetter und Strompreisen
+- Forecast-Service: Wetter (Open-Meteo) + ML-Modell + aWATTar Preise
+- Dashboard: Chart.js Grafik (PV DC Balken, GHI Linie, Preis Linie)
+- Empfehlungstabelle: Batterie, EV, Begründung pro Stunde
+- Negative Strompreise werden erkannt und empfohlen
+- Auto-Refresh Forecast alle 5 Minuten
+
 ## 0.5.1
 
 - Web-UI: Dashboard als Hauptseite (Status, Collector, Training KPIs)

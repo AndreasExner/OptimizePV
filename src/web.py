@@ -98,7 +98,21 @@ DASHBOARD_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OptimizePV</title>
-    <style>""" + SHARED_STYLES + """</style>
+    <style>""" + SHARED_STYLES + """
+    .chart-container { background: #2a2a2a; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .chart-container canvas { max-height: 350px; }
+    .rec-table { width: 100%; font-size: 0.82em; margin-top: 12px; }
+    .rec-table th { background: #333; padding: 6px 10px; text-align: left; white-space: nowrap; }
+    .rec-table td { padding: 5px 10px; border-bottom: 1px solid #333; white-space: nowrap; }
+    .rec-table tr:hover td { background: #333; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; }
+    .badge-green { background: #1b5e20; color: #a5d6a7; }
+    .badge-orange { background: #e65100; color: #ffcc80; }
+    .badge-red { background: #b71c1c; color: #ef9a9a; }
+    .badge-blue { background: #0d47a1; color: #90caf9; }
+    .badge-gray { background: #424242; color: #bdbdbd; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <h1>⚡ OptimizePV</h1>
@@ -111,9 +125,22 @@ DASHBOARD_TEMPLATE = """
         <div class="card info"><div class="label">Laden...</div></div>
     </div>
 
+    <!-- Forecast Chart -->
+    <div class="chart-container">
+        <h2>24h Vorhersage</h2>
+        <canvas id="forecast-chart"></canvas>
+    </div>
+
+    <!-- Empfehlungstabelle -->
+    <div class="table-wrap" id="rec-wrap" style="display:none">
+        <h2>Stündliche Empfehlungen</h2>
+        <table class="rec-table" id="rec-table"></table>
+    </div>
+
     <script>
     const BASE = window.location.pathname.replace(/\\/$/, '');
     document.getElementById('nav-collector').href = BASE + '/collector';
+    let forecastChart = null;
 
     async function loadDashboard() {
         const resp = await fetch(BASE + '/api/dashboard');
@@ -123,7 +150,7 @@ DASHBOARD_TEMPLATE = """
         const statusClass = d.addon_status === 'running' ? 'ok' : 'warn';
         const collectorClass = d.collector.error_rate < 5 ? 'ok' : (d.collector.error_rate < 20 ? 'warn' : 'err');
 
-        let trainingHtml = '–';
+        let trainingHtml;
         if (d.training.r2 != null) {
             trainingHtml = `
                 <div class="value">${(d.training.r2 * 100).toFixed(0)}%</div>
@@ -153,8 +180,124 @@ DASHBOARD_TEMPLATE = """
         `;
     }
 
+    async function loadForecast() {
+        try {
+            const resp = await fetch(BASE + '/api/forecast');
+            const data = await resp.json();
+            if (!data.forecast || !data.forecast.length) return;
+
+            const fc = data.forecast;
+            const labels = fc.map(r => {
+                const d = new Date(r.timestamp);
+                return d.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+            });
+
+            const ctx = document.getElementById('forecast-chart').getContext('2d');
+            if (forecastChart) forecastChart.destroy();
+
+            forecastChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'PV DC (kWh)',
+                            data: fc.map(r => r.pv_dc_forecast),
+                            backgroundColor: 'rgba(255, 167, 38, 0.7)',
+                            borderColor: '#ffa726',
+                            borderWidth: 1,
+                            yAxisID: 'y',
+                            order: 2,
+                        },
+                        {
+                            label: 'GHI (W/m²)',
+                            data: fc.map(r => r.ghi),
+                            type: 'line',
+                            borderColor: '#ffcc80',
+                            backgroundColor: 'transparent',
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            yAxisID: 'y2',
+                            order: 1,
+                        },
+                        {
+                            label: 'Strompreis (EUR/MWh)',
+                            data: fc.map(r => r.price_eur_mwh),
+                            type: 'line',
+                            borderColor: '#ef5350',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            pointRadius: 2,
+                            yAxisID: 'y3',
+                            order: 0,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { labels: { color: '#ccc', font: { size: 11 } } },
+                    },
+                    scales: {
+                        x: { ticks: { color: '#999', font: { size: 10 } }, grid: { color: '#333' } },
+                        y: {
+                            position: 'left', title: { display: true, text: 'PV DC (kWh)', color: '#ffa726' },
+                            ticks: { color: '#ffa726' }, grid: { color: '#333' }, min: 0,
+                        },
+                        y2: {
+                            position: 'right', title: { display: true, text: 'GHI (W/m²)', color: '#ffcc80' },
+                            ticks: { color: '#ffcc80' }, grid: { display: false }, min: 0,
+                        },
+                        y3: {
+                            position: 'right', title: { display: true, text: 'EUR/MWh', color: '#ef5350' },
+                            ticks: { color: '#ef5350' }, grid: { display: false },
+                            afterFit: (axis) => { axis.paddingRight = 10; },
+                        },
+                    },
+                },
+            });
+
+            // Empfehlungstabelle
+            const wrap = document.getElementById('rec-wrap');
+            const table = document.getElementById('rec-table');
+            wrap.style.display = 'block';
+
+            const badgeClass = (action) => {
+                if (action.includes('Laden') && action.includes('neg')) return 'badge-red';
+                if (action.includes('Laden') || action.includes('DC')) return 'badge-green';
+                if (action.includes('Entladen')) return 'badge-orange';
+                if (action.includes('Netz')) return 'badge-blue';
+                return 'badge-gray';
+            };
+
+            let html = '<thead><tr><th>Zeit</th><th>PV DC</th><th>AC verf.</th><th>Preis</th><th>Batterie</th><th>EV</th><th>Begründung</th></tr></thead><tbody>';
+            fc.forEach(r => {
+                const t = new Date(r.timestamp).toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
+                const price = r.price_eur_mwh != null ? r.price_eur_mwh.toFixed(1) : '–';
+                const priceClass = r.is_negative ? 'badge-red' : 'badge-gray';
+                html += `<tr>
+                    <td>${t}</td>
+                    <td class="num">${r.pv_dc_forecast.toFixed(1)} kWh</td>
+                    <td class="num">${r.pv_ac_available.toFixed(1)} kW</td>
+                    <td><span class="badge ${priceClass}">${price}</span></td>
+                    <td><span class="badge ${badgeClass(r.battery_action)}">${r.battery_action}</span></td>
+                    <td><span class="badge ${badgeClass(r.ev_recommendation)}">${r.ev_recommendation}</span></td>
+                    <td class="ts">${r.reason}</td>
+                </tr>`;
+            });
+            html += '</tbody>';
+            table.innerHTML = html;
+
+        } catch (e) {
+            console.error('Forecast laden fehlgeschlagen:', e);
+        }
+    }
+
     loadDashboard();
+    loadForecast();
     setInterval(loadDashboard, 30000);
+    setInterval(loadForecast, 300000); // alle 5 Min
     </script>
 </body>
 </html>
@@ -404,6 +547,37 @@ def api_dashboard():
         })
     finally:
         db.close()
+
+
+@app.route("/api/forecast")
+def api_forecast():
+    """Liefert die 24h Vorhersage als JSON."""
+    from src.forecast import create_forecast
+
+    try:
+        df = create_forecast()
+        if df is None or df.empty:
+            return jsonify({"forecast": [], "error": "Keine Vorhersage verfügbar"})
+
+        # DataFrame → JSON-serialisierbare Liste
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "timestamp": row["timestamp"].isoformat(),
+                "ghi": round(float(row.get("ghi", 0)), 1),
+                "pv_dc_forecast": round(float(row.get("pv_dc_forecast", 0)), 2),
+                "price_eur_mwh": round(float(row["price_eur_mwh"]), 1) if row.get("price_eur_mwh") is not None else None,
+                "is_negative": bool(row.get("is_negative", False)),
+                "pv_ac_available": round(float(row.get("pv_ac_available", 0)), 1),
+                "battery_action": str(row.get("battery_action", "")),
+                "ev_recommendation": str(row.get("ev_recommendation", "")),
+                "reason": str(row.get("reason", "")),
+            })
+
+        return jsonify({"forecast": records})
+
+    except Exception as e:
+        return jsonify({"forecast": [], "error": str(e)}), 500
 
 
 @app.route("/api/status")
