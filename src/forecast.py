@@ -167,6 +167,8 @@ def create_forecast(hours: int = 24, db_path: Path | None = None) -> pd.DataFram
     if "price_eur_mwh" not in result.columns:
         result["price_eur_mwh"] = None
         result["is_negative"] = False
+    # NaN → False (nach left merge haben Stunden ohne Preis NaN)
+    result["is_negative"] = result["is_negative"].fillna(False).astype(bool)
 
     # --- 7. Optimierungsempfehlungen ---
     result = _add_recommendations(result)
@@ -190,7 +192,8 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
         pv_dc = row["pv_dc_forecast"]
         home = row.get("home_forecast", 0.5)
         price = row.get("price_eur_mwh")
-        is_negative = row.get("is_negative", False)
+        is_negative = bool(row.get("is_negative", False))
+        has_price = price is not None and not (isinstance(price, float) and np.isnan(price))
         ghi = row.get("ghi", 0)
 
         # PV auf AC und Batterie aufteilen
@@ -203,7 +206,16 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
         ac_deficit = max(0, home - pv_ac)
 
         # Empfehlungen
-        if ghi <= 10:  # Nacht
+        if not has_price:
+            # Kein Preis verfügbar → keine preisbasierte Empfehlung
+            recommendations.append({
+                "pv_ac_available": round(pv_ac, 1),
+                "surplus": round(ac_surplus, 1),
+                "battery_action": "–",
+                "ev_recommendation": "–",
+                "reason": "Kein Strompreis verfügbar",
+            })
+        elif ghi <= 10:  # Nacht
             recommendations.append({
                 "pv_ac_available": 0,
                 "surplus": 0,

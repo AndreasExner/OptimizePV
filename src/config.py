@@ -123,6 +123,11 @@ def _flatten_sensors(sensor_config: dict) -> dict:
 _sensor_config = _load_sensors()
 HA_SENSORS = _flatten_sensors(_sensor_config)
 
+# EV-Lade-Sensoren (separate Tabelle für Ladeprognose-Modell)
+EV_CHARGING_SENSORS: dict[str, str] = {
+    k: v for k, v in _sensor_config.get("ev_charging", {}).items() if v
+}
+
 # Standort (für Open-Meteo Wetter-API)
 LATITUDE = float(os.getenv("LATITUDE", "51.1657"))
 LONGITUDE = float(os.getenv("LONGITUDE", "10.4515"))

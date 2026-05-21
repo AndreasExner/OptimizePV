@@ -52,3 +52,10 @@ energy:
   
   # EV Charger
   ev_total: "sensor.goe_111927_eto"                   # Lademenge gesamt (kWh)
+
+# --- EV-Ladung (separate Tabelle für Ladeprognose-Modell) ---
+ev_charging:
+  charge_energy_total: "sensor.evcc_goe_anbau_charge_total_import"  # Gesamtenergie Ladepunkt (kWh)
+  charge_power: "sensor.evcc_goe_anbau_charge_power"               # Aktuelle Ladeleistung (W)
+  vehicle_soc: "sensor.evcc_goe_anbau_vehicle_soc"                 # Ladestand EV (%)
+  outdoor_temperature: "sensor.exnerhesel_outdoor_temperature"     # Außentemperatur (°C)

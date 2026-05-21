@@ -376,6 +376,7 @@ COLLECTOR_TEMPLATE = """
     <div class="tabs">
         <button class="tab active" onclick="switchTab('measurements')">Messwerte</button>
         <button class="tab" onclick="switchTab('collector_log')">Collector Log</button>
+        <button class="tab" onclick="switchTab('ev_charging')">EV-Ladung</button>
     </div>
 
     <!-- Toolbar -->
@@ -698,7 +699,7 @@ def api_status():
 @app.route("/api/table/<table_name>")
 def api_table(table_name):
     """Liefert Tabellendaten als JSON."""
-    allowed = {"measurements", "collector_log"}
+    allowed = {"measurements", "collector_log", "ev_charging"}
     if table_name not in allowed:
         return jsonify({"error": "Tabelle nicht erlaubt"}), 400
 

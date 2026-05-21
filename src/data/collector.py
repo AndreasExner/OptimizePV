@@ -17,7 +17,7 @@ import requests
 
 from src.config import (
     DATA_DB_PATH, EVCC_URL, COLLECTOR_INTERVAL, COLLECTOR_RETRY_DELAY,
-    HA_SENSORS,
+    HA_SENSORS, EV_CHARGING_SENSORS,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Schema
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS measurements (
@@ -112,6 +112,17 @@ CREATE TABLE IF NOT EXISTS training_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_training_history_at ON training_history(trained_at);
+
+CREATE TABLE IF NOT EXISTS ev_charging (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp           TEXT    NOT NULL,
+    charge_energy_total REAL,   -- Gesamtenergie Ladepunkt (kWh, kumulativ)
+    charge_power        REAL,   -- Aktuelle Ladeleistung (W)
+    vehicle_soc         REAL,   -- Ladestand EV (%)
+    outdoor_temperature REAL    -- Außentemperatur (°C)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ev_charging_ts ON ev_charging(timestamp);
 
 CREATE TABLE IF NOT EXISTS schema_info (
     version INTEGER NOT NULL
@@ -227,6 +238,19 @@ def _migrate_db(conn: sqlite3.Connection, from_version: int) -> None:
             CREATE INDEX IF NOT EXISTS idx_training_history_at ON training_history(trained_at);
         """)
         logger.info("DB migriert: v%d → v7", from_version)
+    if from_version < 8:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS ev_charging (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp           TEXT    NOT NULL,
+                charge_energy_total REAL,
+                charge_power        REAL,
+                vehicle_soc         REAL,
+                outdoor_temperature REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ev_charging_ts ON ev_charging(timestamp);
+        """)
+        logger.info("DB migriert: v%d → v8", from_version)
 
 
 def store_measurement(data: dict, db_path: Path | None = None) -> None:
@@ -283,6 +307,58 @@ def store_log(status: str, message: str = "", response_ms: int = 0,
             "VALUES (?, ?, ?, ?, ?)",
             (ts, status, source, message, response_ms),
         )
+
+
+def store_ev_charging(data: dict, db_path: Path | None = None) -> None:
+    """Speichert einen EV-Lade-Messwert in der ev_charging Tabelle."""
+    db_path = db_path or DATA_DB_PATH
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """INSERT INTO ev_charging
+               (timestamp, charge_energy_total, charge_power,
+                vehicle_soc, outdoor_temperature)
+               VALUES (?, ?, ?, ?, ?)""",
+            (
+                data["timestamp"],
+                data.get("charge_energy_total"),
+                data.get("charge_power"),
+                data.get("vehicle_soc"),
+                data.get("outdoor_temperature"),
+            ),
+        )
+
+
+def _collect_ev_charging(db_path: Path | None = None) -> None:
+    """Sammelt EV-Ladedaten von HA in die separate ev_charging Tabelle."""
+    if not EV_CHARGING_SENSORS:
+        return
+
+    from src.data.ha_connector import get_site_snapshot
+
+    ts = datetime.now(timezone.utc).isoformat()
+
+    try:
+        values = get_site_snapshot(EV_CHARGING_SENSORS)
+    except Exception as e:
+        logger.warning("EV-Ladedaten nicht verfügbar: %s", e)
+        return
+
+    # Nur speichern wenn tatsächlich geladen wird
+    charge_power = values.get("charge_power")
+    if not charge_power or charge_power <= 0:
+        return
+
+    data = {"timestamp": ts, **values}
+    store_ev_charging(data, db_path)
+
+    logger.debug(
+        "[EV] energy=%.1fkWh, power=%.0fW, soc=%.0f%%, temp=%.1f°C",
+        values.get("charge_energy_total") or 0,
+        values.get("charge_power") or 0,
+        values.get("vehicle_soc") or 0,
+        values.get("outdoor_temperature") or 0,
+    )
 
 
 def get_measurements(hours: int = 24, db_path: Path | None = None):
@@ -348,6 +424,9 @@ def collect_once(db_path: Path | None = None) -> dict | None:
     Returns:
         Dict mit Messwerten oder None bei Fehler.
     """
+    # EV-Ladedaten (separate Tabelle, unabhängig von Hauptquelle)
+    _collect_ev_charging(db_path)
+
     # Primär: Home Assistant
     data = _collect_from_ha(db_path)
     if data is not None:
