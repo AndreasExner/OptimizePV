@@ -1,5 +1,5 @@
 name: "OptimizePV"
-version: "0.8.0"
+version: "0.8.1"
 slug: "optimizepv"
 description: "PV-Optimierung mit ML-basierter Ertragsprognose. Maximiert Eigenverbrauch durch intelligente Batterie- und Ladesteuerung."
 url: "https://github.com/AndreasExner/OptimizePV"

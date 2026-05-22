@@ -33,3 +33,9 @@ models/*.joblib
 # OS
 Thumbs.db
 .DS_Store
+
+# Azurite
+__azurite_db_*
+
+# DB-Kopien im Root
+optimizepv*.db
