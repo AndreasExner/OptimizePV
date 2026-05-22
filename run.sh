@@ -23,19 +23,22 @@ echo "  Log-Level:  ${LOG_LEVEL}"
 echo "  DB:         ${DATA_DB_PATH}"
 
 # sensors.yaml: addon_config (HA File Editor zugänglich)
-# Der Pfad enthält den Repository-Hash-Prefix (z.B. ba10a5b3_optimizepv)
+# Debug: zeige gemountete Pfade
+echo "  addon_configs:"
+ls -la /addon_configs/ 2>/dev/null || echo "    /addon_configs/ nicht vorhanden"
+
 ADDON_CONFIG_DIR=""
-for d in /addon_configs/*optimizepv; do
-    if [ -d "$d" ]; then
+for d in /addon_configs/*optimizepv /addon_configs/*; do
+    if [ -d "$d" ] && [ "$d" != "/addon_configs/*" ]; then
         ADDON_CONFIG_DIR="$d"
         break
     fi
 done
 if [ -z "${ADDON_CONFIG_DIR}" ]; then
-    # Fallback: ohne Hash
     ADDON_CONFIG_DIR="/addon_configs/optimizepv"
     mkdir -p "${ADDON_CONFIG_DIR}"
 fi
+echo "  Config-Dir: ${ADDON_CONFIG_DIR}"
 export SENSORS_YAML_PATH="${ADDON_CONFIG_DIR}/sensors.yaml"
 
 if [ ! -f "${SENSORS_YAML_PATH}" ]; then
