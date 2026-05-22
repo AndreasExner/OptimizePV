@@ -183,69 +183,193 @@ def create_forecast(hours: int = 24, db_path: Path | None = None) -> pd.DataFram
 
 
 def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
-    """Fügt Optimierungsempfehlungen hinzu – berücksichtigt Verbrauch."""
+    """Fügt Optimierungsempfehlungen hinzu – tagesübergreifende Planung.
+
+    Prioritäten:
+    1. Eigenverbrauch: Nur Netzstrom wenn PV nicht reicht
+    2. Batterie auf 100% bis Tagesende
+    3. Laden bei niedrigstem Strompreis (Einspeisung bei neg. Preis minimieren)
+    """
     inverter_max = PV_SPECS["inverter_max_kw"]
     bat_max_charge = PV_SPECS["battery_max_charge_kw"]
+    bat_capacity = PV_SPECS["battery_capacity_kwh"]
+    bat_min_soc = PV_SPECS["battery_min_soc_pct"] / 100  # als Anteil
 
-    recommendations = []
-    for _, row in df.iterrows():
+    # --- Tagesübergreifende Analyse ---
+    # Preise sortiert: günstigste Stunden identifizieren
+    has_prices = df["price_eur_mwh"].notna() & ~df["price_eur_mwh"].apply(
+        lambda x: isinstance(x, float) and np.isnan(x)
+    )
+    neg_hours = set()
+    price_rank = {}  # Index → Rang (0 = günstigster Preis)
+
+    if has_prices.any():
+        priced = df[has_prices].copy()
+        sorted_idx = priced["price_eur_mwh"].sort_values().index.tolist()
+        for rank, idx in enumerate(sorted_idx):
+            price_rank[idx] = rank
+        neg_hours = set(priced[priced["is_negative"] == True].index)
+
+    # --- Stündliches Überschuss-Budget berechnen ---
+    hourly = []
+    for idx, row in df.iterrows():
         pv_dc = row["pv_dc_forecast"]
         home = row.get("home_forecast", 0.5)
         price = row.get("price_eur_mwh")
-        is_negative = bool(row.get("is_negative", False))
+        is_neg = bool(row.get("is_negative", False))
         has_price = price is not None and not (isinstance(price, float) and np.isnan(price))
         ghi = row.get("ghi", 0)
 
-        # PV auf AC und Batterie aufteilen
         pv_ac = min(pv_dc, inverter_max)
         dc_surplus = max(0, pv_dc - inverter_max)
         bat_charge_dc = min(dc_surplus, bat_max_charge)
-
-        # AC-Überschuss nach Verbrauch
         ac_surplus = max(0, pv_ac - home)
         ac_deficit = max(0, home - pv_ac)
 
-        # Empfehlungen
-        if not has_price:
-            # Kein Preis verfügbar → keine preisbasierte Empfehlung
+        hourly.append({
+            "idx": idx,
+            "pv_dc": pv_dc, "pv_ac": pv_ac, "home": home,
+            "ghi": ghi, "price": price, "is_neg": is_neg, "has_price": has_price,
+            "ac_surplus": ac_surplus, "ac_deficit": ac_deficit,
+            "bat_charge_dc": bat_charge_dc,
+            "rank": price_rank.get(idx, 999),
+        })
+
+    # --- Batterie-Ladestrategie ---
+    # Gesamter verfügbarer Überschuss für Batterie (kWh)
+    total_surplus = sum(min(h["ac_surplus"] + h["bat_charge_dc"], bat_max_charge)
+                        for h in hourly if h["ghi"] > 10)
+
+    # Wieviele kWh braucht die Batterie bis 100%? (Start bei min_soc als Worst-Case)
+    bat_to_fill = bat_capacity * (1 - bat_min_soc)
+
+    # Negative Preis-Stunden: wieviel Ladekapazität ist dort verfügbar?
+    neg_charge_capacity = sum(bat_max_charge for h in hourly if h["is_neg"])
+
+    # Stunden mit negativem Preis priorisieren → dort laden
+    # Vor negativen Stunden: Batterie nur auf Puffer halten (20%)
+    first_neg_idx = None
+    if neg_hours:
+        first_neg_idx = min(neg_hours)
+
+    # Welche Stunden sollen laden?
+    # Strategie: Lade bei den günstigsten Preisen, aber priorisiere neg. Preis-Stunden
+    charge_hours = set()
+    if neg_hours:
+        # Alle negativen Stunden → laden
+        charge_hours = neg_hours.copy()
+    # Wenn nicht genug neg. Stunden: günstigste Stunden auffüllen
+    remaining_kwh = bat_to_fill - len(charge_hours) * bat_max_charge
+    if remaining_kwh > 0:
+        ranked = sorted(hourly, key=lambda h: h["rank"])
+        for h in ranked:
+            if h["idx"] not in charge_hours and h["ghi"] > 10:
+                charge_hours.add(h["idx"])
+                remaining_kwh -= bat_max_charge
+                if remaining_kwh <= 0:
+                    break
+
+    # --- Empfehlungen generieren ---
+    recommendations = []
+    for h in hourly:
+        idx = h["idx"]
+        pv_ac = h["pv_ac"]
+        ac_surplus = h["ac_surplus"]
+        ac_deficit = h["ac_deficit"]
+        bat_dc = h["bat_charge_dc"]
+        is_charge_hour = idx in charge_hours
+        before_neg = (first_neg_idx is not None and idx < first_neg_idx
+                      and h["ghi"] > 10)
+
+        if not h["has_price"]:
+            # Kein Preis → keine preisbasierte Empfehlung
+            if h["ghi"] <= 10:
+                bat_action = "Entladen" if ac_deficit > 0.3 else "Halten"
+            elif ac_surplus > 0.5:
+                bat_action = f"Laden ({min(ac_surplus + bat_dc, bat_max_charge):.1f}kW)"
+            else:
+                bat_action = "Halten"
             recommendations.append({
                 "pv_ac_available": round(pv_ac, 1),
                 "surplus": round(ac_surplus, 1),
-                "battery_action": "–",
+                "battery_action": bat_action,
                 "ev_recommendation": "–",
                 "reason": "Kein Strompreis verfügbar",
             })
-        elif ghi <= 10:  # Nacht
-            recommendations.append({
-                "pv_ac_available": 0,
-                "surplus": 0,
-                "battery_action": "Entladen" if ac_deficit > 0.3 else "Halten",
-                "ev_recommendation": "Netz" if not is_negative else "Laden (neg. Preis!)",
-                "reason": f"Nacht – Verbrauch {home:.1f}kWh",
-            })
-        elif is_negative:
-            recommendations.append({
-                "pv_ac_available": round(pv_ac, 1),
-                "surplus": round(ac_surplus, 1),
-                "battery_action": "Aus Netz laden!",
-                "ev_recommendation": "Laden (neg. Preis!)",
-                "reason": f"Neg. Preis ({price:.0f} EUR/MWh) – alles laden!",
-            })
+        elif h["ghi"] <= 10:  # Nacht
+            if h["is_neg"]:
+                recommendations.append({
+                    "pv_ac_available": 0,
+                    "surplus": 0,
+                    "battery_action": "Aus Netz laden!",
+                    "ev_recommendation": "Laden (neg. Preis!)",
+                    "reason": f"Nacht, neg. Preis ({h['price']:.0f} EUR/MWh) – Netz laden!",
+                })
+            else:
+                recommendations.append({
+                    "pv_ac_available": 0,
+                    "surplus": 0,
+                    "battery_action": "Entladen" if ac_deficit > 0.3 else "Halten",
+                    "ev_recommendation": "Warten",
+                    "reason": f"Nacht – Verbrauch {h['home']:.1f}kWh",
+                })
+        elif h["is_neg"]:
+            # Negativer Preis: PV für Eigenverbrauch, Überschuss in Batterie/EV
+            if ac_surplus > 0.5:
+                bat_kw = min(ac_surplus + bat_dc, bat_max_charge)
+                ev_action = "PV-Laden" if ac_surplus > bat_max_charge else "Warten"
+                recommendations.append({
+                    "pv_ac_available": round(pv_ac, 1),
+                    "surplus": round(ac_surplus + bat_dc, 1),
+                    "battery_action": f"Laden ({bat_kw:.1f}kW) + Netz!",
+                    "ev_recommendation": ev_action,
+                    "reason": f"Neg. Preis ({h['price']:.0f}) – Batterie voll laden, Einspeisung vermeiden!",
+                })
+            else:
+                recommendations.append({
+                    "pv_ac_available": round(pv_ac, 1),
+                    "surplus": 0,
+                    "battery_action": "Aus Netz laden!",
+                    "ev_recommendation": "Laden (neg. Preis!)",
+                    "reason": f"Neg. Preis ({h['price']:.0f}) – Netz laden! PV deckt Haus.",
+                })
+        elif before_neg and not is_charge_hour:
+            # Vor negativer Preisphase: Batterie NICHT voll laden (Platz lassen)
+            if ac_surplus > 0.5:
+                recommendations.append({
+                    "pv_ac_available": round(pv_ac, 1),
+                    "surplus": round(ac_surplus, 1),
+                    "battery_action": "Nur Puffer (≤20%)",
+                    "ev_recommendation": "PV-Laden" if ac_surplus > 3 else "Warten",
+                    "reason": f"Batterie freihalten – neg. Preis ab {_fmt_hour(df, first_neg_idx)}",
+                })
+            else:
+                recommendations.append({
+                    "pv_ac_available": round(pv_ac, 1),
+                    "surplus": 0,
+                    "battery_action": "Halten (≤20%)",
+                    "ev_recommendation": "Warten",
+                    "reason": f"PV ≈ Verbrauch, Batterie freihalten für neg. Preis",
+                })
         elif ac_surplus > 3:
+            bat_kw = min(ac_surplus + bat_dc, bat_max_charge)
+            ev_rest = max(0, ac_surplus - bat_max_charge)
+            ev_action = "PV-Laden" if ev_rest > 1.5 else "Min-PV" if ac_surplus > bat_max_charge else "Warten"
             recommendations.append({
                 "pv_ac_available": round(pv_ac, 1),
-                "surplus": round(ac_surplus + bat_charge_dc, 1),
-                "battery_action": f"Laden ({ac_surplus + bat_charge_dc:.1f}kW verf.)",
-                "ev_recommendation": "PV-Laden",
-                "reason": f"PV {pv_dc:.1f}kW − Haus {home:.1f}kW = {ac_surplus:.1f}kW Überschuss",
+                "surplus": round(ac_surplus + bat_dc, 1),
+                "battery_action": f"Laden ({bat_kw:.1f}kW)",
+                "ev_recommendation": ev_action,
+                "reason": f"PV {h['pv_dc']:.1f}kW − Haus {h['home']:.1f}kW = {ac_surplus:.1f}kW Überschuss",
             })
         elif ac_surplus > 0.5:
+            bat_kw = min(ac_surplus + bat_dc, bat_max_charge)
             recommendations.append({
                 "pv_ac_available": round(pv_ac, 1),
-                "surplus": round(ac_surplus + bat_charge_dc, 1),
-                "battery_action": f"Laden ({ac_surplus + bat_charge_dc:.1f}kW verf.)",
+                "surplus": round(ac_surplus + bat_dc, 1),
+                "battery_action": f"Laden ({bat_kw:.1f}kW)",
                 "ev_recommendation": "Min-PV" if ac_surplus > 1.5 else "Warten",
-                "reason": f"PV {pv_dc:.1f}kW − Haus {home:.1f}kW = {ac_surplus:.1f}kW Überschuss",
+                "reason": f"PV {h['pv_dc']:.1f}kW − Haus {h['home']:.1f}kW = {ac_surplus:.1f}kW Überschuss",
             })
         elif ac_deficit > 0.5:
             recommendations.append({
@@ -253,7 +377,7 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
                 "surplus": 0,
                 "battery_action": f"Entladen ({ac_deficit:.1f}kW Defizit)",
                 "ev_recommendation": "Warten",
-                "reason": f"Haus {home:.1f}kW > PV {pv_ac:.1f}kW → Batterie",
+                "reason": f"Haus {h['home']:.1f}kW > PV {pv_ac:.1f}kW → Batterie",
             })
         else:
             recommendations.append({
@@ -261,11 +385,24 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
                 "surplus": round(ac_surplus, 1),
                 "battery_action": "Halten",
                 "ev_recommendation": "Warten",
-                "reason": f"PV ≈ Verbrauch ({pv_ac:.1f} ≈ {home:.1f}kW)",
+                "reason": f"PV ≈ Verbrauch ({pv_ac:.1f} ≈ {h['home']:.1f}kW)",
             })
 
     rec_df = pd.DataFrame(recommendations)
     return pd.concat([df.reset_index(drop=True), rec_df], axis=1)
+
+
+def _fmt_hour(df: pd.DataFrame, idx) -> str:
+    """Formatiert eine Stunde aus dem Forecast für Anzeige."""
+    try:
+        ts = df.loc[idx, "timestamp"]
+        if hasattr(ts, "tz_convert"):
+            ts = ts.tz_convert("Europe/Berlin")
+        if hasattr(ts, "strftime"):
+            return ts.strftime("%H:%M")
+    except Exception:
+        pass
+    return "?"
 
 
 # ---------------------------------------------------------------------------
