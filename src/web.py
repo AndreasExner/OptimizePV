@@ -1090,9 +1090,88 @@ FORECASTS_TEMPLATE = """
 
 def run_web(host: str = "0.0.0.0", port: int = 8099):
     """Startet den Web-Server (Waitress Production Server)."""
+    import signal
     from waitress import serve
-    serve(app, host=host, port=port, threads=2)
+
+    _write_pidfile()
+
+    def _shutdown(_sig, _frame):
+        _remove_pidfile()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    print(f"OptimizePV Web-UI: http://{host}:{port}")
+    try:
+        serve(app, host=host, port=port, threads=2)
+    finally:
+        _remove_pidfile()
+
+
+# ---------------------------------------------------------------------------
+# PID-File für stop/restart
+# ---------------------------------------------------------------------------
+import tempfile
+from pathlib import Path
+
+_PID_FILE = Path(tempfile.gettempdir()) / "optimizepv_web.pid"
+
+
+def _write_pidfile():
+    _PID_FILE.write_text(str(os.getpid()))
+
+
+def _remove_pidfile():
+    _PID_FILE.unlink(missing_ok=True)
+
+
+def _read_pid() -> int | None:
+    if _PID_FILE.exists():
+        try:
+            return int(_PID_FILE.read_text().strip())
+        except (ValueError, OSError):
+            pass
+    return None
+
+
+def stop_web() -> bool:
+    """Stoppt einen laufenden Web-Server via PID-File."""
+    import signal as _sig
+
+    pid = _read_pid()
+    if pid is None:
+        print("Kein laufender Web-Server gefunden.")
+        return False
+
+    try:
+        os.kill(pid, _sig.SIGTERM)
+        print(f"Web-Server gestoppt (PID {pid}).")
+        _remove_pidfile()
+        return True
+    except ProcessLookupError:
+        print(f"Prozess {pid} existiert nicht mehr.")
+        _remove_pidfile()
+        return False
+    except PermissionError:
+        print(f"Keine Berechtigung, Prozess {pid} zu beenden.")
+        return False
 
 
 if __name__ == "__main__":
-    run_web()
+    import sys
+
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "start"
+
+    if cmd == "start":
+        run_web()
+    elif cmd == "stop":
+        stop_web()
+    elif cmd == "restart":
+        stop_web()
+        import time
+        time.sleep(1)
+        run_web()
+    else:
+        print(f"Usage: python -m src.web [start|stop|restart]")
+        sys.exit(1)

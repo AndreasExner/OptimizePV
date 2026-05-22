@@ -22,34 +22,26 @@ echo "  Intervall:  ${COLLECTOR_INTERVAL}s"
 echo "  Log-Level:  ${LOG_LEVEL}"
 echo "  DB:         ${DATA_DB_PATH}"
 
-# sensors.yaml: addon_config (HA File Editor zugänglich)
-# Debug: zeige gemountete Pfade
-echo "  addon_configs:"
-ls -la /addon_configs/ 2>/dev/null || echo "    /addon_configs/ nicht vorhanden"
-
+# sensors.yaml: addon_config (HA File Editor) oder /data/ (Fallback)
 ADDON_CONFIG_DIR=""
-for d in /addon_configs/*optimizepv /addon_configs/*; do
-    if [ -d "$d" ] && [ "$d" != "/addon_configs/*" ]; then
-        ADDON_CONFIG_DIR="$d"
-        break
-    fi
-done
+if [ -d /addon_configs ]; then
+    for d in /addon_configs/*optimizepv /addon_configs/*; do
+        if [ -d "$d" ] && [ "$d" != "/addon_configs/*" ]; then
+            ADDON_CONFIG_DIR="$d"
+            break
+        fi
+    done
+fi
 if [ -z "${ADDON_CONFIG_DIR}" ]; then
-    ADDON_CONFIG_DIR="/addon_configs/optimizepv"
-    mkdir -p "${ADDON_CONFIG_DIR}"
+    # Fallback: /data/ (immer verfügbar)
+    ADDON_CONFIG_DIR="/data"
 fi
 echo "  Config-Dir: ${ADDON_CONFIG_DIR}"
 export SENSORS_YAML_PATH="${ADDON_CONFIG_DIR}/sensors.yaml"
 
 if [ ! -f "${SENSORS_YAML_PATH}" ]; then
-    if [ -f /data/sensors.yaml ]; then
-        # Migration von alter Position
-        mv /data/sensors.yaml "${SENSORS_YAML_PATH}"
-        echo "  sensors.yaml migriert: /data/ → ${ADDON_CONFIG_DIR}/"
-    else
-        cp /app/sensors.yaml.default "${SENSORS_YAML_PATH}"
-        echo "  sensors.yaml generiert: ${SENSORS_YAML_PATH}"
-    fi
+    cp /app/sensors.yaml.default "${SENSORS_YAML_PATH}"
+    echo "  sensors.yaml generiert: ${SENSORS_YAML_PATH}"
 else
     echo "  sensors.yaml: ${SENSORS_YAML_PATH}"
 fi
