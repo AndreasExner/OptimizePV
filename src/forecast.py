@@ -286,7 +286,7 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
             if h["ghi"] <= 10:
                 bat_action = "Entladen" if ac_deficit > 0.3 else "Halten"
             elif ac_surplus > 0.5:
-                bat_action = f"Laden ({min(ac_surplus + bat_dc, bat_max_charge):.1f}kW)"
+                bat_action = f"PV-Laden ({min(ac_surplus + bat_dc, bat_max_charge):.1f}kW)"
             else:
                 bat_action = "Halten"
             recommendations.append({
@@ -298,12 +298,13 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
             })
         elif h["ghi"] <= 10:  # Nacht
             if h["is_neg"]:
+                # Nacht + neg. Preis: Batterie halten, kein Netzbezug zum Laden
                 recommendations.append({
                     "pv_ac_available": 0,
                     "surplus": 0,
-                    "battery_action": "Aus Netz laden!",
-                    "ev_recommendation": "Laden (neg. Preis!)",
-                    "reason": f"Nacht, neg. Preis ({h['price']:.0f} EUR/MWh) – Netz laden!",
+                    "battery_action": "Halten",
+                    "ev_recommendation": "Warten",
+                    "reason": f"Nacht, neg. Preis ({h['price']:.0f}) – kein PV, Batterie halten",
                 })
             else:
                 recommendations.append({
@@ -314,24 +315,27 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
                     "reason": f"Nacht – Verbrauch {h['home']:.1f}kWh",
                 })
         elif h["is_neg"]:
-            # Negativer Preis: PV für Eigenverbrauch, Überschuss in Batterie/EV
+            # Negativer Preis: PV → Eigenverbrauch, Überschuss → Batterie/EV
+            # KEIN Netzstrom zum Laden! Nur PV-Überschuss nutzen.
             if ac_surplus > 0.5:
                 bat_kw = min(ac_surplus + bat_dc, bat_max_charge)
-                ev_action = "PV-Laden" if ac_surplus > bat_max_charge else "Warten"
+                ev_rest = max(0, ac_surplus + bat_dc - bat_max_charge)
+                ev_action = "PV-Laden" if ev_rest > 1.5 else "Warten"
                 recommendations.append({
                     "pv_ac_available": round(pv_ac, 1),
                     "surplus": round(ac_surplus + bat_dc, 1),
-                    "battery_action": f"Laden ({bat_kw:.1f}kW) + Netz!",
+                    "battery_action": f"PV-Laden ({bat_kw:.1f}kW)",
                     "ev_recommendation": ev_action,
-                    "reason": f"Neg. Preis ({h['price']:.0f}) – Batterie voll laden, Einspeisung vermeiden!",
+                    "reason": f"Neg. Preis ({h['price']:.0f}) – PV-Überschuss → Batterie, nicht einspeisen!",
                 })
             else:
+                # Kein Überschuss bei neg. Preis: PV deckt gerade Haus
                 recommendations.append({
                     "pv_ac_available": round(pv_ac, 1),
                     "surplus": 0,
-                    "battery_action": "Aus Netz laden!",
-                    "ev_recommendation": "Laden (neg. Preis!)",
-                    "reason": f"Neg. Preis ({h['price']:.0f}) – Netz laden! PV deckt Haus.",
+                    "battery_action": "Halten",
+                    "ev_recommendation": "Warten",
+                    "reason": f"Neg. Preis ({h['price']:.0f}) – PV deckt Haus, kein Überschuss",
                 })
         elif before_neg and not is_charge_hour:
             # Vor negativer Preisphase: Batterie NICHT voll laden (Platz lassen)
@@ -358,7 +362,7 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
             recommendations.append({
                 "pv_ac_available": round(pv_ac, 1),
                 "surplus": round(ac_surplus + bat_dc, 1),
-                "battery_action": f"Laden ({bat_kw:.1f}kW)",
+                "battery_action": f"PV-Laden ({bat_kw:.1f}kW)",
                 "ev_recommendation": ev_action,
                 "reason": f"PV {h['pv_dc']:.1f}kW − Haus {h['home']:.1f}kW = {ac_surplus:.1f}kW Überschuss",
             })
@@ -367,7 +371,7 @@ def _add_recommendations(df: pd.DataFrame) -> pd.DataFrame:
             recommendations.append({
                 "pv_ac_available": round(pv_ac, 1),
                 "surplus": round(ac_surplus + bat_dc, 1),
-                "battery_action": f"Laden ({bat_kw:.1f}kW)",
+                "battery_action": f"PV-Laden ({bat_kw:.1f}kW)",
                 "ev_recommendation": "Min-PV" if ac_surplus > 1.5 else "Warten",
                 "reason": f"PV {h['pv_dc']:.1f}kW − Haus {h['home']:.1f}kW = {ac_surplus:.1f}kW Überschuss",
             })
