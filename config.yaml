@@ -23,6 +23,8 @@ schema:
 map:
   - type: data
     read_only: false
+  - type: addon_config
+    read_only: false
 homeassistant_api: true
 ingress: true
 ingress_port: 8099

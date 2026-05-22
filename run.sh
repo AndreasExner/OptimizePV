@@ -22,11 +22,21 @@ echo "  Intervall:  ${COLLECTOR_INTERVAL}s"
 echo "  Log-Level:  ${LOG_LEVEL}"
 echo "  DB:         ${DATA_DB_PATH}"
 
-# sensors.yaml beim ersten Start generieren
-export SENSORS_YAML_PATH="/data/sensors.yaml"
+# sensors.yaml: addon_config (HA File Editor zugänglich)
+# Migration: alte /data/sensors.yaml → /addon_configs/optimizepv/
+ADDON_CONFIG_DIR="/addon_configs/optimizepv"
+mkdir -p "${ADDON_CONFIG_DIR}"
+export SENSORS_YAML_PATH="${ADDON_CONFIG_DIR}/sensors.yaml"
+
 if [ ! -f "${SENSORS_YAML_PATH}" ]; then
-    cp /app/sensors.yaml.default "${SENSORS_YAML_PATH}"
-    echo "  sensors.yaml generiert: ${SENSORS_YAML_PATH}"
+    if [ -f /data/sensors.yaml ]; then
+        # Migration von alter Position
+        mv /data/sensors.yaml "${SENSORS_YAML_PATH}"
+        echo "  sensors.yaml migriert: /data/ → ${ADDON_CONFIG_DIR}/"
+    else
+        cp /app/sensors.yaml.default "${SENSORS_YAML_PATH}"
+        echo "  sensors.yaml generiert: ${SENSORS_YAML_PATH}"
+    fi
 else
     echo "  sensors.yaml: ${SENSORS_YAML_PATH}"
 fi

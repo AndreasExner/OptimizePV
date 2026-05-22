@@ -39,14 +39,16 @@ def _load_sensors() -> dict:
     
     Suchpfade (in dieser Reihenfolge):
     1. SENSORS_YAML_PATH (Umgebungsvariable)
-    2. /data/sensors.yaml (HA Add-on)
-    3. PROJECT_ROOT/sensors.yaml (Entwicklung)
-    4. Fallback: sensors.yaml.default
+    2. /addon_configs/optimizepv/sensors.yaml (HA Add-on, File Editor)
+    3. /data/sensors.yaml (HA Add-on, Legacy)
+    4. PROJECT_ROOT/sensors.yaml (Entwicklung)
+    5. Fallback: sensors.yaml.default
     """
     import yaml
 
     search_paths = [
         SENSORS_YAML_PATH if SENSORS_YAML_PATH != Path("") else None,
+        Path("/addon_configs/optimizepv/sensors.yaml"),
         Path("/data/sensors.yaml"),
         PROJECT_ROOT / "sensors.yaml",
     ]
